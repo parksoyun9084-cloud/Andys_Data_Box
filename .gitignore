@@ -310,3 +310,4 @@ pyrightconfig.json
 
 .data
 data/
+.omx/
