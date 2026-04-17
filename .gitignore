@@ -311,3 +311,7 @@ pyrightconfig.json
 .data
 data/
 .omx/
+.codex
+.env
+/data
+data/.env
