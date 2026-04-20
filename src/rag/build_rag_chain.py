@@ -8,18 +8,28 @@
 
 from pathlib import Path
 from collections import Counter, defaultdict
+from typing import Any
 
 import pandas as pd
 from rank_bm25 import BM25Okapi
 
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_community.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 
 try:
     from .api_key_loader import load_api_key
+    from .pinecone_vector_store import (
+        EXAMPLE_INDEX_NAME,
+        RAG_INDEX_NAME,
+        get_pinecone_vector_store,
+    )
 except ImportError:
     from api_key_loader import load_api_key
+    from pinecone_vector_store import (
+        EXAMPLE_INDEX_NAME,
+        RAG_INDEX_NAME,
+        get_pinecone_vector_store,
+    )
 
 
 # ============================================================
@@ -30,8 +40,6 @@ PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 RESPONSE_TEXT_PATH = PROCESSED_DATA_DIR / "response_pairs_with_text.csv"
-VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_rag_db"
-EXAMPLE_VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_example_db"
 
 
 # ============================================================
@@ -94,36 +102,30 @@ def build_bm25(rag_df: pd.DataFrame) -> BM25Okapi:
     return BM25Okapi(tokenized_rag_texts)
 
 
-def load_vector_db(openai_api_key: str) -> FAISS:
+def load_vector_db(openai_api_key: str) -> Any:
     embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=openai_api_key,
     )
 
-    if not VECTOR_DB_DIR.exists():
-        raise FileNotFoundError(f"벡터DB 폴더가 없습니다: {VECTOR_DB_DIR}")
-
-    vector_db = FAISS.load_local(
-        str(VECTOR_DB_DIR),
-        embedding_model,
-        allow_dangerous_deserialization=True
+    vector_db = get_pinecone_vector_store(
+        index_name=RAG_INDEX_NAME,
+        embedding=embedding_model,
+        pinecone_api_key=load_api_key("PINECONE_API_KEY"),
     )
     return vector_db
 
 
-def load_example_vector_db(openai_api_key: str) -> FAISS:
+def load_example_vector_db(openai_api_key: str) -> Any:
     embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=openai_api_key,
     )
 
-    if not EXAMPLE_VECTOR_DB_DIR.exists():
-        raise FileNotFoundError(f"예시 벡터DB 폴더가 없습니다: {EXAMPLE_VECTOR_DB_DIR}")
-
-    example_vector_db = FAISS.load_local(
-        str(EXAMPLE_VECTOR_DB_DIR),
-        embedding_model,
-        allow_dangerous_deserialization=True
+    example_vector_db = get_pinecone_vector_store(
+        index_name=EXAMPLE_INDEX_NAME,
+        embedding=embedding_model,
+        pinecone_api_key=load_api_key("PINECONE_API_KEY"),
     )
     return example_vector_db
 
@@ -163,7 +165,7 @@ def bm25_search(query: str, rag_df: pd.DataFrame, bm25: BM25Okapi, k: int = 3) -
     return results
 
 
-def dense_search(query: str, vector_db: FAISS, k: int = 3) -> list[dict]:
+def dense_search(query: str, vector_db: Any, k: int = 3) -> list[dict]:
     retrieved_docs = vector_db.similarity_search(query, k=k)
 
     results = []
@@ -179,7 +181,7 @@ def dense_search(query: str, vector_db: FAISS, k: int = 3) -> list[dict]:
     return results
 
 
-def example_dense_search(question: str, example_vector_db: FAISS, k: int = 5) -> list[dict]:
+def example_dense_search(question: str, example_vector_db: Any, k: int = 5) -> list[dict]:
     retrieved_examples = example_vector_db.similarity_search(question, k=k)
 
     results = []
@@ -222,7 +224,7 @@ def retrieve_documents(
     question: str,
     rag_df: pd.DataFrame,
     bm25: BM25Okapi,
-    vector_db: FAISS,
+    vector_db: Any,
     method: str = "rrf",
     k: int = 3
 ) -> list[dict]:
@@ -365,7 +367,7 @@ def get_response_examples(
     retrieved_docs: list[dict],
     emotion: str,
     question: str,
-    example_vector_db: FAISS,
+    example_vector_db: Any,
     top_n: int = 3
 ) -> str:
     dialogue_ids = [

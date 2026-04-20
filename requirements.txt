@@ -7,3 +7,5 @@ langchain-community
 matplotlib
 rank-bm25
 google-genai
+langchain-pinecone
+pinecone

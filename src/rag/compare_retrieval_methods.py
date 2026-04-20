@@ -9,18 +9,20 @@
 
 from pathlib import Path
 from collections import defaultdict
+from typing import Any
 
 import pandas as pd
 import matplotlib.pyplot as plt
 from rank_bm25 import BM25Okapi
 
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
 
 try:
     from .api_key_loader import load_api_key
+    from .pinecone_vector_store import RAG_INDEX_NAME, get_pinecone_vector_store
 except ImportError:
     from api_key_loader import load_api_key
+    from pinecone_vector_store import RAG_INDEX_NAME, get_pinecone_vector_store
 
 
 # ============================================================
@@ -30,7 +32,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
-VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_rag_db"
 
 COMPARE_OUTPUT_PATH = PROCESSED_DATA_DIR / "retrieval_compare_results.csv"
 SUMMARY_OUTPUT_PATH = PROCESSED_DATA_DIR / "retrieval_evaluation_summary.csv"
@@ -84,19 +85,16 @@ def build_bm25(rag_df: pd.DataFrame) -> BM25Okapi:
     return BM25Okapi(tokenized_rag_texts)
 
 
-def load_vector_db(openai_api_key: str) -> FAISS:
+def load_vector_db(openai_api_key: str) -> Any:
     embedding_model = OpenAIEmbeddings(
         model="text-embedding-3-small",
         api_key=openai_api_key,
     )
 
-    if not VECTOR_DB_DIR.exists():
-        raise FileNotFoundError(f"벡터DB 폴더가 없습니다: {VECTOR_DB_DIR}")
-
-    vector_db = FAISS.load_local(
-        str(VECTOR_DB_DIR),
-        embedding_model,
-        allow_dangerous_deserialization=True
+    vector_db = get_pinecone_vector_store(
+        index_name=RAG_INDEX_NAME,
+        embedding=embedding_model,
+        pinecone_api_key=load_api_key("PINECONE_API_KEY"),
     )
     return vector_db
 
@@ -130,7 +128,7 @@ def bm25_search(query: str, rag_df: pd.DataFrame, bm25: BM25Okapi, k: int = 3) -
     return results
 
 
-def dense_search(query: str, vector_db: FAISS, k: int = 3) -> list[dict]:
+def dense_search(query: str, vector_db: Any, k: int = 3) -> list[dict]:
     scored_docs = vector_db.similarity_search_with_score(query, k=k)
 
     results = []
@@ -186,7 +184,7 @@ def reciprocal_rank_fusion(result_lists: list[list[dict]], k: int = 60, top_n: i
 def build_compare_results(
     rag_df: pd.DataFrame,
     bm25: BM25Okapi,
-    vector_db: FAISS,
+    vector_db: Any,
     queries: list[str],
     k: int = 3
 ) -> pd.DataFrame:

@@ -1,19 +1,38 @@
 # ============================================================
 # - rag_documents_with_text.csv를 불러옴
 # - response_pairs_with_text.csv를 불러옴
-# - rag_text를 임베딩하여 검색용 FAISS 벡터DB 생성
-# - response_example_text를 임베딩하여 응답예시용 FAISS 벡터DB 생성
+# - rag_text를 임베딩하여 검색용 Pinecone 벡터DB 생성
+# - response_example_text를 임베딩하여 응답예시용 Pinecone 벡터DB 생성
 # - metadata를 함께 저장함
 # ============================================================
 
-from pathlib import Path
-import os
-import time
-import pandas as pd
-from dotenv import load_dotenv
+from __future__ import annotations
 
+from pathlib import Path
+import time
+from typing import Any
+
+import pandas as pd
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
+
+try:
+    from .api_key_loader import load_api_key
+    from .pinecone_vector_store import (
+        EXAMPLE_INDEX_NAME,
+        RAG_INDEX_NAME,
+        clear_pinecone_index,
+        get_pinecone_client,
+        get_pinecone_vector_store,
+    )
+except ImportError:
+    from api_key_loader import load_api_key
+    from pinecone_vector_store import (
+        EXAMPLE_INDEX_NAME,
+        RAG_INDEX_NAME,
+        clear_pinecone_index,
+        get_pinecone_client,
+        get_pinecone_vector_store,
+    )
 
 
 # ============================================================
@@ -25,137 +44,75 @@ PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 RAG_TEXT_PATH = PROCESSED_DATA_DIR / "rag_documents_with_text.csv"
 RESPONSE_TEXT_PATH = PROCESSED_DATA_DIR / "response_pairs_with_text.csv"
 
-VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_rag_db"
-EXAMPLE_VECTOR_DB_DIR = PROCESSED_DATA_DIR / "faiss_example_db"
-
 MAX_TEXT_LENGTH = 4000
 
 
 # ============================================================
-# 2. API KEY 로드
-#    우선순위: .streamlit/secrets.toml -> .env
+# 2. 문자열 처리 함수
 # ============================================================
-def _is_placeholder(value: str) -> bool:
-    normalized = value.strip().strip('"').strip("'")
-    if not normalized:
-        return True
-    return (
-        normalized.startswith("<")
-        or normalized.startswith("your_")
-        or normalized.upper() in {"TODO", "TBD", "REPLACE_ME", "CHANGEME"}
-    )
-
-
-def _load_from_secrets_toml(key: str) -> str | None:
-    secrets_path = PROJECT_ROOT / ".streamlit" / "secrets.toml"
-    if not secrets_path.exists():
-        return None
-
-    try:
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[no-redef]
-
-        with secrets_path.open("rb") as f:
-            secret_data = tomllib.load(f)
-    except Exception:
-        return None
-
-    secret_value = secret_data.get(key)
-    if secret_value and not _is_placeholder(str(secret_value)):
-        return str(secret_value)
-    return None
-
-
-def _load_from_env_files(key: str) -> str | None:
-    for env_path in (PROJECT_ROOT / "data" / ".env", PROJECT_ROOT / ".env"):
-        if env_path.exists():
-            load_dotenv(dotenv_path=env_path, override=False)
-
-    env_value = os.getenv(key)
-    if env_value and not _is_placeholder(env_value):
-        return env_value
-    return None
-
-
-def load_api_key(key: str = "OPENAI_API_KEY") -> str:
-    openai_api_key = _load_from_secrets_toml(key) or _load_from_env_files(key)
-    if not openai_api_key:
-        raise ValueError(
-            f"{key}가 설정되지 않음. .streamlit/secrets.toml 또는 .env를 확인하세요."
-        )
-    return openai_api_key
-
-
-OPENAI_API_KEY = load_api_key("OPENAI_API_KEY")
-
-
-# ============================================================
-# 3. 문자열 처리 함수
-# ============================================================
-def clean_text(x):
+def clean_text(x) -> str:
     if pd.isna(x):
         return ""
     return str(x).strip()
 
 
-def truncate_text(text, max_len=4000):
+def truncate_text(text, max_len: int = MAX_TEXT_LENGTH) -> str:
     text = clean_text(text)
     if len(text) <= max_len:
         return text
     return text[:max_len]
 
 
-# ============================================================
-# 4. CSV 로드
-# ============================================================
-if not RAG_TEXT_PATH.exists():
-    raise FileNotFoundError(f"파일을 찾을 수 없음: {RAG_TEXT_PATH}")
-
-if not RESPONSE_TEXT_PATH.exists():
-    raise FileNotFoundError(f"파일을 찾을 수 없음: {RESPONSE_TEXT_PATH}")
-
-rag_df = pd.read_csv(RAG_TEXT_PATH)
-response_df = pd.read_csv(RESPONSE_TEXT_PATH)
-
-print("===== RAG CSV 로드 완료 =====")
-print(rag_df.shape)
-print(rag_df.columns.tolist())
-
-print("\n===== RESPONSE CSV 로드 완료 =====")
-print(response_df.shape)
-print(response_df.columns.tolist())
+def build_stable_ids(prefix: str, count: int) -> list[str]:
+    return [f"{prefix}-{idx:06d}" for idx in range(count)]
 
 
 # ============================================================
-# 5. rag_text 유효성 확인
+# 3. CSV 로드
 # ============================================================
-if "rag_text" not in rag_df.columns:
-    raise ValueError("rag_text 컬럼이 없음.")
+def load_source_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not RAG_TEXT_PATH.exists():
+        raise FileNotFoundError(f"파일을 찾을 수 없음: {RAG_TEXT_PATH}")
 
-rag_df["rag_text"] = rag_df["rag_text"].astype(str).str.strip()
-rag_df = rag_df[rag_df["rag_text"] != ""].copy()
+    if not RESPONSE_TEXT_PATH.exists():
+        raise FileNotFoundError(f"파일을 찾을 수 없음: {RESPONSE_TEXT_PATH}")
 
-print("\n===== 유효 RAG 문서 수 =====")
-print(len(rag_df))
+    rag_df = pd.read_csv(RAG_TEXT_PATH)
+    response_df = pd.read_csv(RESPONSE_TEXT_PATH)
+
+    print("===== RAG CSV 로드 완료 =====")
+    print(rag_df.shape)
+    print(rag_df.columns.tolist())
+
+    print("\n===== RESPONSE CSV 로드 완료 =====")
+    print(response_df.shape)
+    print(response_df.columns.tolist())
+
+    if "rag_text" not in rag_df.columns:
+        raise ValueError("rag_text 컬럼이 없음.")
+
+    rag_df["rag_text"] = rag_df["rag_text"].astype(str).str.strip()
+    rag_df = rag_df[rag_df["rag_text"] != ""].copy()
+
+    print("\n===== 유효 RAG 문서 수 =====")
+    print(len(rag_df))
+
+    if "response_example_text" not in response_df.columns:
+        raise ValueError("response_example_text 컬럼이 없음.")
+
+    response_df["response_example_text"] = (
+        response_df["response_example_text"].astype(str).str.strip()
+    )
+    response_df = response_df[response_df["response_example_text"] != ""].copy()
+
+    print("\n===== 유효 RESPONSE 예시 수 =====")
+    print(len(response_df))
+
+    return rag_df, response_df
 
 
 # ============================================================
-# 6. response_example_text 유효성 확인
-# ============================================================
-if "response_example_text" not in response_df.columns:
-    raise ValueError("response_example_text 컬럼이 없음.")
-
-response_df["response_example_text"] = response_df["response_example_text"].astype(str).str.strip()
-response_df = response_df[response_df["response_example_text"] != ""].copy()
-
-print("\n===== 유효 RESPONSE 예시 수 =====")
-print(len(response_df))
-
-
-# ============================================================
-# 7. rag texts / metadatas 준비
+# 4. rag texts / metadatas 준비
 # ============================================================
 def build_rag_texts_and_metadatas(rag_df: pd.DataFrame):
     texts = []
@@ -183,7 +140,7 @@ def build_rag_texts_and_metadatas(rag_df: pd.DataFrame):
 
 
 # ============================================================
-# 8. response example texts / metadatas 준비
+# 5. response example texts / metadatas 준비
 # ============================================================
 def build_example_texts_and_metadatas(response_df: pd.DataFrame):
     example_texts = []
@@ -206,70 +163,75 @@ def build_example_texts_and_metadatas(response_df: pd.DataFrame):
     return example_texts, example_metadatas
 
 
-texts, metadatas = build_rag_texts_and_metadatas(rag_df)
-example_texts, example_metadatas = build_example_texts_and_metadatas(response_df)
+def rebuild_vector_store(
+    index_name: str,
+    texts: list[str],
+    metadatas: list[dict],
+    ids: list[str],
+    embeddings: OpenAIEmbeddings,
+    pinecone_client: Any,
+) -> float:
+    print(f"\n===== Pinecone 벡터DB 생성 시작: {index_name} =====")
+    start_time = time.time()
 
-print("\n===== 첫 번째 RAG metadata 샘플 =====")
-print(metadatas[0])
+    vector_store = get_pinecone_vector_store(
+        index_name=index_name,
+        embedding=embeddings,
+        client=pinecone_client,
+    )
+    clear_pinecone_index(index_name, client=pinecone_client)
+    vector_store.add_texts(texts=texts, metadatas=metadatas, ids=ids)
 
-print("\n===== 첫 번째 RESPONSE metadata 샘플 =====")
-print(example_metadatas[0])
+    elapsed = time.time() - start_time
+    print(f"===== Pinecone 벡터DB 생성 완료: {index_name} =====")
+    print(f"소요 시간: {round(elapsed, 2)}초")
 
-
-# ============================================================
-# 9. 임베딩 모델 준비
-# ============================================================
-embeddings = OpenAIEmbeddings(
-    model="text-embedding-3-small",
-    api_key=OPENAI_API_KEY,
-)
-
-
-# ============================================================
-# 10. RAG FAISS 벡터DB 생성
-# ============================================================
-print("\n===== RAG FAISS 벡터DB 생성 시작 =====")
-start_time = time.time()
-
-vector_db = FAISS.from_texts(
-    texts=texts,
-    embedding=embeddings,
-    metadatas=metadatas,
-)
-
-elapsed = time.time() - start_time
-
-print("===== RAG FAISS 벡터DB 생성 완료 =====")
-print(f"소요 시간: {round(elapsed, 2)}초")
+    return elapsed
 
 
-# ============================================================
-# 11. RESPONSE EXAMPLE FAISS 벡터DB 생성
-# ============================================================
-print("\n===== RESPONSE EXAMPLE FAISS 벡터DB 생성 시작 =====")
-example_start_time = time.time()
+def main() -> None:
+    openai_api_key = load_api_key("OPENAI_API_KEY")
+    pinecone_api_key = load_api_key("PINECONE_API_KEY")
+    pinecone_client = get_pinecone_client(pinecone_api_key=pinecone_api_key)
 
-example_vector_db = FAISS.from_texts(
-    texts=example_texts,
-    embedding=embeddings,
-    metadatas=example_metadatas,
-)
+    rag_df, response_df = load_source_data()
 
-example_elapsed = time.time() - example_start_time
+    texts, metadatas = build_rag_texts_and_metadatas(rag_df)
+    example_texts, example_metadatas = build_example_texts_and_metadatas(response_df)
 
-print("===== RESPONSE EXAMPLE FAISS 벡터DB 생성 완료 =====")
-print(f"소요 시간: {round(example_elapsed, 2)}초")
+    print("\n===== 첫 번째 RAG metadata 샘플 =====")
+    print(metadatas[0])
+
+    print("\n===== 첫 번째 RESPONSE metadata 샘플 =====")
+    print(example_metadatas[0])
+
+    embeddings = OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        api_key=openai_api_key,
+    )
+
+    rebuild_vector_store(
+        index_name=RAG_INDEX_NAME,
+        texts=texts,
+        metadatas=metadatas,
+        ids=build_stable_ids("rag", len(texts)),
+        embeddings=embeddings,
+        pinecone_client=pinecone_client,
+    )
+
+    rebuild_vector_store(
+        index_name=EXAMPLE_INDEX_NAME,
+        texts=example_texts,
+        metadatas=example_metadatas,
+        ids=build_stable_ids("example", len(example_texts)),
+        embeddings=embeddings,
+        pinecone_client=pinecone_client,
+    )
+
+    print("\n===== Pinecone 저장 완료 =====")
+    print(RAG_INDEX_NAME)
+    print(EXAMPLE_INDEX_NAME)
 
 
-# ============================================================
-# 12. 저장
-# ============================================================
-VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
-vector_db.save_local(str(VECTOR_DB_DIR))
-
-EXAMPLE_VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
-example_vector_db.save_local(str(EXAMPLE_VECTOR_DB_DIR))
-
-print("\n===== 저장 완료 =====")
-print(VECTOR_DB_DIR)
-print(EXAMPLE_VECTOR_DB_DIR)
+if __name__ == "__main__":
+    main()
