@@ -315,3 +315,5 @@ data/
 .env
 /data
 data/.env
+*.csv
+git rm --cached -- data/.env
