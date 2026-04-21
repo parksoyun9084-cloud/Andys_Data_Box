@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -35,6 +38,14 @@ from .risk_analyzer import analyze_risk, full_analysis
 LLMCaller = Callable[[str], str]
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_RPM = 5
+DEFAULT_GEMINI_WINDOW_SECONDS = 60.0
+DEFAULT_GEMINI_RETRY_LIMIT = 2
+DEFAULT_GEMINI_INITIAL_BACKOFF_SECONDS = 1.0
+DEFAULT_GEMINI_MAX_BACKOFF_SECONDS = 4.0
+DEFAULT_GEMINI_TRANSIENT_ERROR_MESSAGE = (
+    "Gemini is temporarily unavailable. Please wait a moment and try again."
+)
 DEFAULT_SECRET_PATHS = (
     Path(".streamlit") / "secrets.toml",
     Path("data") / ".env",
@@ -44,6 +55,49 @@ DEFAULT_SECRET_PATHS = (
 
 class GeminiConnectorError(RuntimeError):
     """Raised when the Gemini connector cannot be initialized or invoked."""
+
+
+class _SlidingWindowRateLimiter:
+    """Simple in-process sliding-window limiter for Gemini requests."""
+
+    def __init__(
+        self,
+        *,
+        max_calls: int,
+        window_seconds: float,
+        time_func: Callable[[], float] | None = None,
+        sleep_func: Callable[[float], None] | None = None,
+    ) -> None:
+        self.max_calls = max_calls
+        self.window_seconds = window_seconds
+        self._time_func = time_func or time.monotonic
+        self._sleep_func = sleep_func or time.sleep
+        self._timestamps: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> None:
+        while True:
+            wait_seconds = 0.0
+            with self._lock:
+                now = self._time_func()
+                self._trim(now)
+                if len(self._timestamps) < self.max_calls:
+                    self._timestamps.append(now)
+                    return
+                oldest = self._timestamps[0]
+                wait_seconds = max(self.window_seconds - (now - oldest), 0.0)
+
+            self._sleep_func(wait_seconds)
+
+    def _trim(self, now: float) -> None:
+        while self._timestamps and now - self._timestamps[0] >= self.window_seconds:
+            self._timestamps.popleft()
+
+
+DEFAULT_GEMINI_RATE_LIMITER = _SlidingWindowRateLimiter(
+    max_calls=DEFAULT_GEMINI_RPM,
+    window_seconds=DEFAULT_GEMINI_WINDOW_SECONDS,
+)
 
 
 @dataclass(frozen=True)
@@ -151,6 +205,78 @@ def load_secret(
     return default
 
 
+def _extract_status_code(exc: Exception) -> int | None:
+    for attr_name in ("status_code", "code"):
+        value = getattr(exc, attr_name, None)
+        if isinstance(value, int):
+            return value
+
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+    return None
+
+
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    status_code = _extract_status_code(exc)
+    if status_code in {429, 503}:
+        return True
+
+    message = str(exc).lower()
+    retryable_markers = (
+        "429",
+        "503",
+        "service unavailable",
+        "resource exhausted",
+        "rate limit",
+        "quota",
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
+def _generate_content_with_resilience(
+    *,
+    client: Any,
+    model: str,
+    contents: str,
+    config: Any = None,
+    rate_limiter: _SlidingWindowRateLimiter | None = None,
+    retry_limit: int = DEFAULT_GEMINI_RETRY_LIMIT,
+    initial_backoff_seconds: float = DEFAULT_GEMINI_INITIAL_BACKOFF_SECONDS,
+    max_backoff_seconds: float = DEFAULT_GEMINI_MAX_BACKOFF_SECONDS,
+    sleep_func: Callable[[float], None] | None = None,
+) -> Any:
+    limiter = rate_limiter or DEFAULT_GEMINI_RATE_LIMITER
+    sleep = sleep_func or time.sleep
+
+    attempt = 0
+    while True:
+        limiter.acquire()
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
+            )
+        except Exception as exc:
+            if not _is_retryable_gemini_error(exc) or attempt >= retry_limit:
+                if _is_retryable_gemini_error(exc):
+                    raise GeminiConnectorError(
+                        DEFAULT_GEMINI_TRANSIENT_ERROR_MESSAGE
+                    ) from exc
+                raise GeminiConnectorError(
+                    f"Gemini content generation failed: {exc}"
+                ) from exc
+
+            backoff_seconds = min(
+                initial_backoff_seconds * (2**attempt),
+                max_backoff_seconds,
+            )
+            sleep(backoff_seconds)
+            attempt += 1
+
+
 def create_gemini_caller(
     *,
     api_key: str | None = None,
@@ -158,6 +284,11 @@ def create_gemini_caller(
     temperature: float = 0.0,
     client: Any | None = None,
     project_root: Path | None = None,
+    rate_limiter: _SlidingWindowRateLimiter | None = None,
+    retry_limit: int = DEFAULT_GEMINI_RETRY_LIMIT,
+    initial_backoff_seconds: float = DEFAULT_GEMINI_INITIAL_BACKOFF_SECONDS,
+    max_backoff_seconds: float = DEFAULT_GEMINI_MAX_BACKOFF_SECONDS,
+    sleep_func: Callable[[float], None] | None = None,
 ) -> LLMCaller:
     """Create a Gemini-backed ``llm_caller(prompt)`` for existing analyzers.
 
@@ -199,12 +330,20 @@ def create_gemini_caller(
                     temperature=temperature,
                     response_mime_type="application/json",
                 )
-            response = client.models.generate_content(
+            response = _generate_content_with_resilience(
+                client=client,
                 model=model,
                 contents=prompt,
                 config=config,
+                rate_limiter=rate_limiter,
+                retry_limit=retry_limit,
+                initial_backoff_seconds=initial_backoff_seconds,
+                max_backoff_seconds=max_backoff_seconds,
+                sleep_func=sleep_func,
             )
         except Exception as exc:
+            if isinstance(exc, GeminiConnectorError):
+                raise
             raise GeminiConnectorError(f"Gemini content generation failed: {exc}") from exc
 
         text = getattr(response, "text", None)
@@ -232,17 +371,32 @@ class GeminiFunctionCallingRouter:
         temperature: float = 0.0,
         client: Any | None = None,
         project_root: Path | None = None,
+        rate_limiter: _SlidingWindowRateLimiter | None = None,
+        retry_limit: int = DEFAULT_GEMINI_RETRY_LIMIT,
+        initial_backoff_seconds: float = DEFAULT_GEMINI_INITIAL_BACKOFF_SECONDS,
+        max_backoff_seconds: float = DEFAULT_GEMINI_MAX_BACKOFF_SECONDS,
+        sleep_func: Callable[[float], None] | None = None,
     ) -> None:
         self.model = model
         self.temperature = temperature
         self.project_root = project_root
         self._client = client
+        self._rate_limiter = rate_limiter
+        self._retry_limit = retry_limit
+        self._initial_backoff_seconds = initial_backoff_seconds
+        self._max_backoff_seconds = max_backoff_seconds
+        self._sleep_func = sleep_func
         self.llm_caller = llm_caller or create_gemini_caller(
             api_key=api_key,
             model=model,
             temperature=temperature,
             client=client,
             project_root=project_root,
+            rate_limiter=rate_limiter,
+            retry_limit=retry_limit,
+            initial_backoff_seconds=initial_backoff_seconds,
+            max_backoff_seconds=max_backoff_seconds,
+            sleep_func=sleep_func,
         )
 
     @staticmethod
@@ -374,12 +528,20 @@ class GeminiFunctionCallingRouter:
             temperature=self.temperature,
         )
         try:
-            response = client.models.generate_content(
+            response = _generate_content_with_resilience(
+                client=client,
                 model=self.model,
                 contents=request,
                 config=config,
+                rate_limiter=self._rate_limiter,
+                retry_limit=self._retry_limit,
+                initial_backoff_seconds=self._initial_backoff_seconds,
+                max_backoff_seconds=self._max_backoff_seconds,
+                sleep_func=self._sleep_func,
             )
         except Exception as exc:
+            if isinstance(exc, GeminiConnectorError):
+                raise
             raise GeminiConnectorError(f"Gemini function routing failed: {exc}") from exc
 
         text = getattr(response, "text", None)

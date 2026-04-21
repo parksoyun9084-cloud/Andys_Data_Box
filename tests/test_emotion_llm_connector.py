@@ -11,6 +11,8 @@ from pathlib import Path
 from src.emotion import analyze_emotion, full_analysis
 from src.emotion.llm_connector import (
     GeminiFunctionCallingRouter,
+    GeminiConnectorError,
+    _SlidingWindowRateLimiter,
     create_gemini_caller,
     load_secret,
 )
@@ -79,6 +81,30 @@ class FakeClient:
         self.models = FakeModels()
 
 
+class RetryableGeminiError(Exception):
+    def __init__(self, message: str = "503 Service Unavailable", status_code: int = 503):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class FakeSequentialModels:
+    def __init__(self, outcomes) -> None:
+        self.calls = []
+        self._outcomes = list(outcomes)
+
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+class FakeSequentialClient:
+    def __init__(self, outcomes) -> None:
+        self.models = FakeSequentialModels(outcomes)
+
+
 class EmotionLLMConnectorTest(unittest.TestCase):
     def test_existing_public_api_still_accepts_injected_llm_caller(self) -> None:
         result = analyze_emotion("안녕", llm_caller=fake_emotion_llm)
@@ -136,6 +162,87 @@ class EmotionLLMConnectorTest(unittest.TestCase):
         caller = create_gemini_caller(client=fake_client)
         self.assertEqual(caller("Return JSON"), '{"ok": true}')
         self.assertEqual(fake_client.models.calls[0]["model"], "gemini-2.5-flash")
+
+    def test_create_gemini_caller_waits_for_next_rpm_slot(self) -> None:
+        current_time = [100.0]
+        sleep_calls = []
+
+        def fake_now() -> float:
+            return current_time[0]
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            current_time[0] += seconds
+
+        limiter = _SlidingWindowRateLimiter(
+            max_calls=5,
+            window_seconds=60.0,
+            time_func=fake_now,
+            sleep_func=fake_sleep,
+        )
+        fake_client = FakeClient()
+        caller = create_gemini_caller(
+            client=fake_client,
+            rate_limiter=limiter,
+            sleep_func=fake_sleep,
+        )
+
+        for _ in range(6):
+            self.assertEqual(caller("Return JSON"), '{"ok": true}')
+
+        self.assertEqual(len(fake_client.models.calls), 6)
+        self.assertEqual(sleep_calls, [60.0])
+
+    def test_create_gemini_caller_retries_retryable_503_then_succeeds(self) -> None:
+        sleep_calls = []
+        limiter = _SlidingWindowRateLimiter(
+            max_calls=10,
+            window_seconds=60.0,
+            time_func=lambda: 100.0,
+            sleep_func=lambda seconds: None,
+        )
+        fake_client = FakeSequentialClient(
+            [RetryableGeminiError(), FakeResponse()]
+        )
+        caller = create_gemini_caller(
+            client=fake_client,
+            rate_limiter=limiter,
+            retry_limit=2,
+            initial_backoff_seconds=0.5,
+            max_backoff_seconds=1.0,
+            sleep_func=sleep_calls.append,
+        )
+
+        self.assertEqual(caller("Return JSON"), '{"ok": true}')
+        self.assertEqual(len(fake_client.models.calls), 2)
+        self.assertEqual(sleep_calls, [0.5])
+
+    def test_create_gemini_caller_raises_clear_error_after_retry_exhaustion(self) -> None:
+        sleep_calls = []
+        limiter = _SlidingWindowRateLimiter(
+            max_calls=10,
+            window_seconds=60.0,
+            time_func=lambda: 100.0,
+            sleep_func=lambda seconds: None,
+        )
+        fake_client = FakeSequentialClient(
+            [RetryableGeminiError(), RetryableGeminiError(), RetryableGeminiError()]
+        )
+        caller = create_gemini_caller(
+            client=fake_client,
+            rate_limiter=limiter,
+            retry_limit=2,
+            initial_backoff_seconds=0.5,
+            max_backoff_seconds=1.0,
+            sleep_func=sleep_calls.append,
+        )
+
+        with self.assertRaises(GeminiConnectorError) as exc_info:
+            caller("Return JSON")
+
+        self.assertIn("temporarily unavailable", str(exc_info.exception))
+        self.assertEqual(len(fake_client.models.calls), 3)
+        self.assertEqual(sleep_calls, [0.5, 1.0])
 
     def test_router_dispatches_full_analysis_tool_locally(self) -> None:
         router = GeminiFunctionCallingRouter(llm_caller=fake_emotion_llm)
