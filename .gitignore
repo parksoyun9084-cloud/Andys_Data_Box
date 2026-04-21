@@ -315,3 +315,4 @@ data/
 .env
 /data
 data/.env
+*.csv
