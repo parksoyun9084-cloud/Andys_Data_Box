@@ -270,15 +270,15 @@ project/
         <tr>
             <td rowspan="4" style="text-align: center; font-weight: bold; border: 1px solid #ddd;">전승권</td>
             <td style="text-align: center; border: 1px solid #ddd;">김용욱</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
+            <td style="border: 1px solid #ddd; padding: 10px;">RAG 파트중 벡터DB 로컬에 생성을 깔끔하게 해주었다</td>
         </tr>
         <tr>
             <td style="text-align: center; border: 1px solid #ddd;">박소윤</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
+            <td style="border: 1px solid #ddd; padding: 10px;">프로젝트 전반 의견표명이 확실,팀 역할 분배를 확실하게 함으로서 주도를 해주셔서 다행이였음</td>
         </tr>
         <tr>
             <td style="text-align: center; border: 1px solid #ddd;">윤찬호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"></td>
+            <td style="border: 1px solid #ddd; padding: 10px;">전처리 데이터셋을 담당 함으로서 자료 준비수월하게 되어서 프로젝트 수행시 나쁘지않았다</td>
         </tr>
        
 </table>
