@@ -77,6 +77,7 @@ def apply_custom_css():
         .bubble-right {
             border: 2px solid #916848;
             background: #FFFDF9;
+            color: #000000;
         }
 
         .avatar {
