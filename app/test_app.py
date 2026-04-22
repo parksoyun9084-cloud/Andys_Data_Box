@@ -42,7 +42,6 @@ def apply_custom_css():
         .section-title {
             font-size: 18px;
             font-weight: 700;
-            color: #212529;
             margin-bottom: 12px;
         }
 
@@ -358,7 +357,7 @@ def main():
         unsafe_allow_html=True
     )
 
-    col_chat, col_report = st.columns([5.5, 4.5])
+    col_chat, col_report = st.columns([1, 1])
 
     with col_chat:
         st.markdown(
@@ -412,93 +411,82 @@ def main():
     with col_report:
         st.markdown('<div class="section-title">AI 분석 결과</div>', unsafe_allow_html=True)
 
-        latest = st.session_state.latest_result
-        emotion_label, emotion_score, emotion_emoji, emotion_desc = "대기 중", 0, "🙂", "입력 시 분석을 시작합니다."
-        risk_label, risk_score, risk_color, risk_desc = "대기 중", 0, "#ADB5BD", "갈등 위험도를 측정합니다."
+        with st.container(height=550):
+            latest = st.session_state.latest_result
+            emotion_label, emotion_score, emotion_emoji, emotion_desc = "대기 중", 0, "🙂", "입력 시 분석을 시작합니다."
+            risk_label, risk_score, risk_color, risk_desc = "대기 중", 0, "#ADB5BD", "갈등 위험도를 측정합니다."
 
-        if latest:
-            emotion_label = clean_display_text(latest["emotion"]["label"])
-            emotion_score = latest["emotion"]["score"]
-            emotion_emoji = get_emotion_emoji(emotion_label)
-            emotion_desc = get_emotion_description(emotion_label)
-            risk_label = clean_display_text(latest["risk"]["label"])
-            risk_score = latest["risk"]["score"]
-            risk_color = get_risk_color(risk_label)
-            risk_desc = get_risk_description(risk_label)
+            if latest:
+                emotion_label = clean_display_text(latest["emotion"]["label"])
+                emotion_score = latest["emotion"]["score"]
+                emotion_emoji = get_emotion_emoji(emotion_label)
+                emotion_desc = get_emotion_description(emotion_label)
+                risk_label = clean_display_text(latest["risk"]["label"])
+                risk_score = latest["risk"]["score"]
+                risk_color = get_risk_color(risk_label)
+                risk_desc = get_risk_description(risk_label)
 
-        card_l, card_r = st.columns(2)
-        with card_l:
-            render_analysis_card("감정 분석", emotion_emoji, emotion_label, emotion_score, "#5C7CFA", emotion_desc)
-        with card_r:
-            render_analysis_card("위험도 분석", "⏱️", risk_label, risk_score, risk_color, risk_desc)
+            card_l, card_r = st.columns(2)
+            with card_l:
+                render_analysis_card("감정 분석", emotion_emoji, emotion_label, emotion_score, "#5C7CFA", emotion_desc)
+            with card_r:
+                render_analysis_card("위험도 분석", "⏱️", risk_label, risk_score, risk_color, risk_desc)
 
-        if st.session_state.error_message:
-            st.error(st.session_state.error_message)
+            if st.session_state.error_message:
+                st.error(st.session_state.error_message)
 
-        st.write("")
-        st.markdown("<strong>입력 메시지 분석</strong>", unsafe_allow_html=True)
-
-        if latest:
-            render_text_box("상황 요약", latest.get("summary_text", ""))
-            render_text_box("감정 해석", latest.get("emotion_text", ""))
-            if latest["risk"].get("recommendation"):
-                render_text_box("대응 가이드", latest["risk"]["recommendation"])
-        else:
-            st.markdown('<div class="note-box">왼쪽 대화창에 내용을 입력하면 상세 분석 결과가 표시됩니다.</div>', unsafe_allow_html=True)
-
-        st.write("")
-        st.markdown(
-            "<div style='display:flex; justify-content:space-between; align-items:center;'><strong>💡 AI 추천 답변</strong><span style='font-size:12px; color:#aaa;'>복사</span></div>",
-            unsafe_allow_html=True
-        )
-
-        if latest and latest.get("reply_candidates"):
-            for i, text in enumerate(latest["reply_candidates"][:3], 1):
-                safe_text = clean_display_text(text).replace("\n", "<br>")
-
-                st.markdown(
-                    f"""
-                    <div class="list-item">
-                        <div class="item-icon">{i}</div>
-                        <div class="item-content">{safe_text}</div>
-                        <button class="copy-button"
-                        onclick='copyToClipboard(`{safe_text}`)'>복사</button>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-        else:
-            st.info("분석 후 추천 답변이 표시됩니다.")
-
-        if latest and latest.get("recommended_replies"):
             st.write("")
-            st.markdown("<strong>📚 RAG 참고 예시</strong>", unsafe_allow_html=True)
-            for item in latest["recommended_replies"][:3]:
-                label = clean_display_text(item.get("label", ""))
-                text = clean_display_text(item.get("text", ""))
-                source = clean_display_text(item.get("source_listener_empathy", ""))
-                evidence = f"[{label}] {text}"
-                if source:
-                    evidence += f"\n근거 유형: {source}"
-                render_text_box("검색된 응답 예시", evidence)
+            st.markdown("<strong>입력 메시지 분석</strong>", unsafe_allow_html=True)
 
-        st.write("")
-        st.markdown("<strong>⚠️ 피해야 할 표현 / 대체 표현</strong>", unsafe_allow_html=True)
-        l_col, r_col = st.columns(2)
-        if latest:
-            with l_col: render_phrase_box("피해야 할 표현", [clean_display_text(x) for x in latest.get("avoid_phrases", [])][:2], "없음")
-            with r_col: render_phrase_box("대체 표현", [clean_display_text(x) for x in latest.get("alternative_phrases", [])][:2], "없음")
-        else:
-            with l_col: render_text_box("피해야 할 표현", "예: 비난형 표현")
-            with r_col: render_text_box("대체 표현", "예: 감정 설명형 표현")
+            if latest:
+                render_text_box("상황 요약", latest.get("summary_text", ""))
+                render_text_box("감정 해석", latest.get("emotion_text", ""))
+                if latest["risk"].get("recommendation"):
+                    render_text_box("대응 가이드", latest["risk"]["recommendation"])
+            else:
+                st.markdown('<div class="note-box">왼쪽 대화창에 내용을 입력하면 상세 분석 결과가 표시됩니다.</div>', unsafe_allow_html=True)
 
-        st.write("")
-        st.markdown("<strong>대화 히스토리 (최근 3개)</strong>", unsafe_allow_html=True)
-        if st.session_state.history:
-            for idx, item in enumerate(st.session_state.history[:3]):
-                render_history_item("💬", item.get("user_input", "")[:30], "방금" if idx==0 else f"{idx+1}전", item.get("assistant_message", "")[:70], idx==0)
-        else:
-            render_history_item("💬", "히스토리 없음", "-", "첫 분석을 시작해보세요.", True)
+            st.write("")
+            st.markdown(
+                "<div style='display:flex; justify-content:space-between; align-items:center;'><strong>💡 AI 추천 답변</strong><span style='font-size:12px; color:#aaa;'>복사</span></div>",
+                unsafe_allow_html=True
+            )
+
+            if latest and latest.get("reply_candidates"):
+                for i, text in enumerate(latest["reply_candidates"][:3], 1):
+                    safe_text = clean_display_text(text).replace("\n", "<br>")
+
+                    st.markdown(
+                        f"""
+                        <div class="list-item">
+                            <div class="item-icon">{i}</div>
+                            <div class="item-content">{safe_text}</div>
+                            <button class="copy-button"
+                            onclick='copyToClipboard(`{safe_text}`)'>복사</button>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.info("분석 후 추천 답변이 표시됩니다.")
+
+            st.write("")
+            st.markdown("<strong>⚠️ 피해야 할 표현 / 대체 표현</strong>", unsafe_allow_html=True)
+            l_col, r_col = st.columns(2)
+            if latest:
+                with l_col: render_phrase_box("피해야 할 표현", [clean_display_text(x) for x in latest.get("avoid_phrases", [])][:2], "없음")
+                with r_col: render_phrase_box("대체 표현", [clean_display_text(x) for x in latest.get("alternative_phrases", [])][:2], "없음")
+            else:
+                with l_col: render_text_box("피해야 할 표현", "예: 비난형 표현")
+                with r_col: render_text_box("대체 표현", "예: 감정 설명형 표현")
+
+            st.write("")
+            st.markdown("<strong>대화 히스토리 (최근 3개)</strong>", unsafe_allow_html=True)
+            if st.session_state.history:
+                for idx, item in enumerate(st.session_state.history[:3]):
+                    render_history_item("💬", item.get("user_input", "")[:30], "방금" if idx==0 else f"{idx+1}전", item.get("assistant_message", "")[:70], idx==0)
+            else:
+                render_history_item("💬", "히스토리 없음", "-", "첫 분석을 시작해보세요.", True)
 
 if __name__ == "__main__":
     main()
