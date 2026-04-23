@@ -30,7 +30,9 @@ from typing import Optional
 from .emotion_analyzer import (
     EMOTION_GROUP,
     EMOTION_LABEL_EN,
+    GROUP_STRATEGY,
     DialogueEmotionResult,
+    EmotionResult,
     EmotionClassifier,
 )
 
@@ -375,9 +377,47 @@ class RiskAnalyzer:
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
+            recovered = RiskAnalyzer._extract_balanced_json_object(text)
+            if recovered:
+                try:
+                    parsed = json.loads(recovered)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
             raise ValueError(
                 f"LLM 응답 JSON 파싱 실패: {e}\n원본 응답:\n{text[:300]}"
             ) from e
+
+    @staticmethod
+    def _extract_balanced_json_object(text: str) -> str:
+        start = text.find("{")
+        if start < 0:
+            return ""
+
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : index + 1].strip()
+        return ""
 
 
 # ──────────────────────────────────────────────
@@ -437,39 +477,147 @@ def _clean_aux_list(value: object) -> list[str]:
     return results
 
 
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _estimate_fallback_emotion(joined_dialogue: str) -> tuple[str, str, float, str]:
+    lowered = joined_dialogue.lower()
+    emotion_rules = [
+        (
+            "혐오",
+            0.78,
+            (
+                "지긋지긋",
+                "재수없",
+                "꺼져",
+                "싫어",
+                "정떨어",
+                "질렸",
+            ),
+        ),
+        (
+            "분노",
+            0.76,
+            (
+                "화나",
+                "화가",
+                "짜증",
+                "왜 ",
+                "왜?",
+                "무시",
+                "연락 안",
+                "답장",
+                "기다렸",
+                "거짓말",
+                "수상",
+                "바람",
+            ),
+        ),
+        (
+            "슬픔",
+            0.72,
+            (
+                "서운",
+                "속상",
+                "외로",
+                "미안",
+                "울",
+                "힘들",
+                "슬프",
+                "지쳤",
+                "상처",
+            ),
+        ),
+        (
+            "공포",
+            0.7,
+            (
+                "불안",
+                "걱정",
+                "무서",
+                "두려",
+                "헤어질까",
+                "떠날까",
+            ),
+        ),
+        (
+            "행복",
+            0.7,
+            (
+                "좋아",
+                "고마워",
+                "행복",
+                "기뻐",
+                "다행",
+            ),
+        ),
+    ]
+    for label, confidence, keywords in emotion_rules:
+        if _contains_any(lowered, keywords):
+            return label, EMOTION_GROUP[label], confidence, f"입력 문장의 핵심 표현({label})을 기반으로 한 fallback 추정입니다."
+    return "중립", "neutral", 0.5, "LLM 분석 실패 후 뚜렷한 감정 단서가 적어 중립으로 추정했습니다."
+
+
+def _estimate_fallback_risk(joined_dialogue: str) -> tuple[float, str, str, int, str]:
+    lowered = joined_dialogue.lower()
+    if _contains_any(lowered, ("자살", "죽고 싶", "죽어버", "때리", "폭력", "협박")):
+        return 0.85, "critical", "심각", 5, "극단적 표현이나 안전 위협 단서가 있어 심각 단계로 추정했습니다."
+    if _contains_any(lowered, ("헤어지자", "끝내자", "꺼져", "지긋지긋", "재수없", "정떨어", "바람", "거짓말")):
+        return 0.68, "danger", "위험", 4, "관계 단절 또는 강한 거부 표현이 있어 위험 단계로 추정했습니다."
+    if _contains_any(lowered, ("화나", "화가", "짜증", "무시", "연락 안", "답장", "서운", "속상", "불안", "기다렸")):
+        return 0.5, "warning", "경고", 3, "부정 감정과 갈등 단서가 명확해 경고 단계로 추정했습니다."
+    if _contains_any(lowered, ("왜", "걱정", "미안", "섭섭")):
+        return 0.3, "caution", "주의", 2, "경미한 불만 또는 확인 필요 단서가 있어 주의 단계로 추정했습니다."
+    return 0.15, "safe", "안전", 1, "강한 갈등 단서가 적어 안전 단계로 추정했습니다."
+
+
 def _fallback_full_analysis(
     utterances: list[str],
     dialogue_id: str | None,
     error: Exception,
 ) -> dict:
     joined_dialogue = " ".join(str(utterance).strip() for utterance in utterances)
+    emotion_label, emotion_group, confidence, emotion_reasoning = _estimate_fallback_emotion(joined_dialogue)
+    risk_score, risk_level, risk_label, risk_grade, risk_reasoning = _estimate_fallback_risk(joined_dialogue)
     summary = (
-        "Gemini 분석을 완료하지 못해 기본 기준으로 임시 분석했습니다. "
+        "Gemini 분석을 완료하지 못해 입력 표현 기반 기준으로 임시 분석했습니다. "
         "대화 내용을 바탕으로 차분한 확인과 공감 중심의 응답을 권장합니다."
     )
     if joined_dialogue:
         summary = f"{summary} 입력 요약: {joined_dialogue[:120]}"
 
+    utterance_result = EmotionResult(
+        utterance=joined_dialogue,
+        primary=emotion_label,
+        primary_en=EMOTION_LABEL_EN.get(emotion_label, "neutral"),
+        group=emotion_group,
+        confidence=confidence,
+        method="fallback",
+        reasoning=emotion_reasoning,
+        strategy=GROUP_STRATEGY.get(emotion_group, ""),
+    )
+    negative_ratio = 1.0 if emotion_group == "negative" else 0.0
     emotion_result = DialogueEmotionResult(
         dialogue_id=dialogue_id,
-        utterance_results=[],
-        emotion_sequence=[],
-        dominant_emotion="중립",
-        dominant_group="neutral",
-        negative_ratio=0.0,
+        utterance_results=[utterance_result] if joined_dialogue else [],
+        emotion_sequence=[emotion_label] if joined_dialogue else [],
+        dominant_emotion=emotion_label,
+        dominant_group=emotion_group,
+        negative_ratio=negative_ratio,
         emotion_volatility=0.0,
         method="fallback",
     )
     risk_result = RiskResult(
         dialogue_id=dialogue_id,
-        risk_score=0.2,
-        risk_level="caution",
-        risk_label="주의",
-        risk_grade=2,
-        emotion_sequence=[],
-        recommendation="상대의 감정을 단정하지 말고, 현재 느낀 점을 차분히 확인하세요.",
+        risk_score=risk_score,
+        risk_level=risk_level,
+        risk_label=risk_label,
+        risk_grade=risk_grade,
+        emotion_sequence=emotion_result.emotion_sequence,
+        recommendation=RISK_RECOMMENDATIONS.get(risk_level, "상대의 감정을 단정하지 말고 차분히 확인하세요."),
         method="fallback",
-        reasoning=f"Gemini 분석 실패로 기본 주의 등급을 적용했습니다. 원인: {type(error).__name__}",
+        reasoning=f"{risk_reasoning} 원인: {type(error).__name__}",
     )
     gemini_auxiliary = {
         "summary": summary,

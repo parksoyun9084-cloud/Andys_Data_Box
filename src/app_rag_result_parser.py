@@ -6,11 +6,24 @@ from __future__ import annotations
 import re
 from typing import Any
 
+CANONICAL_REPLY_LABELS = ("공감형", "조언형", "갈등 완충형")
+REPLY_LABEL_ALIASES = {
+    "공감형": "공감형",
+    "조언형": "조언형",
+    "갈등 완충형": "갈등 완충형",
+    "완화형": "조언형",
+    "비난 회피형": "갈등 완충형",
+}
+
 
 def clean_text(value: Any, default: str = "") -> str:
     if value is None:
         return default
     return str(value).strip()
+
+
+def canonical_reply_label(label: Any) -> str:
+    return REPLY_LABEL_ALIASES.get(clean_text(label), "")
 
 
 def normalize_sentence(text: str) -> str:
@@ -126,12 +139,19 @@ def extract_quoted_candidates(text: str) -> list[str]:
 
 def extract_reply_candidates(result_text: str, fallback_examples: str) -> list[str]:
     candidates: list[str] = []
+    seen_labels: set[str] = set()
 
-    for section_name in ["공감형", "완화형", "비난 회피형"]:
+    for section_name in list(CANONICAL_REPLY_LABELS) + ["완화형", "비난 회피형"]:
         value = parse_section(result_text, section_name)
         value = normalize_sentence(value)
-        if is_valid_reply_candidate(value) and value not in candidates:
-            candidates.append(f"[{section_name}] {value}")
+        canonical_label = canonical_reply_label(section_name)
+        if (
+            canonical_label
+            and canonical_label not in seen_labels
+            and is_valid_reply_candidate(value)
+        ):
+            seen_labels.add(canonical_label)
+            candidates.append(f"[{canonical_label}] {value}")
 
     if candidates:
         return candidates[:3]
