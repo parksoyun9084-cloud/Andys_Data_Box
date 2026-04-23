@@ -60,7 +60,7 @@ def classify_relationship_query(question: str) -> str:
 
     lover_keywords = [
         "남자친구", "여자친구", "남친", "여친", "썸",
-        "읽씹", "답장", "연락", "헤어지", "이별", "커플", "애인"
+        "읽씹", "답장", "헤어지", "이별", "커플", "애인"
     ]
 
     if any(k in q for k in lover_keywords):
@@ -149,9 +149,7 @@ def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
     rag_df = rag_df.reset_index(drop=True)
 
     return rag_df, response_df
-    
-def local_dataframes_available() -> bool:
-    return RAG_TEXT_PATH.exists() and RESPONSE_TEXT_PATH.exists()
+
 
 def build_bm25(rag_df: pd.DataFrame) -> Any:
     try:
@@ -327,9 +325,6 @@ def retrieve_documents(
 ) -> list[dict]:
 
     search_k = max(k * 4, 12)
-
-    if method == "bm25" and (bm25 is None or rag_df is None):
-        raise ValueError("BM25 검색에는 로컬 CSV 기반 rag_df와 bm25 인덱스가 필요합니다.")
 
     dense_results = dense_search(question, vector_db=vector_db, k=search_k)
 
@@ -607,13 +602,6 @@ def select_style_labeled_response_examples(
 
     selected = []
     used_texts = set()
-    best_any_rows = []
-    for _, row in candidate_df.iterrows():
-        text = _response_text_from_row(row)
-        if not text:
-            continue
-        best_any_rows.append((int(row.get("score", 0)), row))
-    best_any_rows.sort(key=lambda x: x[0], reverse=True)
 
     for style in target_styles:
         rows = []
@@ -649,26 +637,6 @@ def select_style_labeled_response_examples(
                 "text": text,
                 "dialogue_id": clean_text(best.get("dialogue_id", "")),
             })
-            continue
-
-        fallback = None
-        for _, row in best_any_rows:
-            text = _response_text_from_row(row)
-            if text and text not in used_texts:
-                fallback = row
-                break
-        if fallback is None and best_any_rows:
-            fallback = best_any_rows[0][1]
-
-        if fallback is not None:
-            text = _response_text_from_row(fallback)
-            if text:
-                used_texts.add(text)
-                selected.append({
-                    "label": style,
-                    "text": text,
-                    "dialogue_id": clean_text(fallback.get("dialogue_id", "")),
-                })
 
     return selected
 
@@ -885,7 +853,7 @@ def generate_recommended_reply(
 
     rag_df = response_df = bm25 = None
 
-    if use_local_csv or method == "bm25":
+    if use_local_csv or method in ("bm25", "rrf"):
         rag_df, response_df = load_dataframes()
         bm25 = build_bm25(rag_df)
 
@@ -910,23 +878,12 @@ def generate_recommended_reply(
 
     context = format_docs(retrieved_docs) if retrieved_docs else "검색 결과 없음"
 
-    recommended_replies = get_labeled_response_examples(
+    response_examples = get_response_examples(
         response_df=response_df,
         retrieved_docs=retrieved_docs,
         emotion=main_emotion,
         question=question,
         example_vector_db=example_vector_db,
-    )
-    response_examples = (
-        format_labeled_response_examples(recommended_replies)
-        if recommended_replies
-        else get_response_examples(
-            response_df=response_df,
-            retrieved_docs=retrieved_docs,
-            emotion=main_emotion,
-            question=question,
-            example_vector_db=example_vector_db,
-        )
     )
 
     prompt = PROMPT.format(
@@ -942,7 +899,6 @@ def generate_recommended_reply(
 
     return {
         "question": question,
-        "method": method,
         "query_type": query_type,
         "search_query": search_query,
         "retrieved_docs": retrieved_docs,
@@ -950,7 +906,6 @@ def generate_recommended_reply(
         "main_emotion": main_emotion,
         "risk_level": risk_level,
         "response_examples": response_examples,
-        "recommended_replies": recommended_replies,
         "result_text": result.content,
     }
 
