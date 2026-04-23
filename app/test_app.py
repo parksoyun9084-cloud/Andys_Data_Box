@@ -472,8 +472,6 @@ def main():
     col_chat, col_report = st.columns([1.05, 1])
 
     with col_chat:
-        st.markdown('<div class="chat-shell">', unsafe_allow_html=True)
-
         with st.container(height=550):
 
             for idx, msg in enumerate(st.session_state.messages):
@@ -493,8 +491,6 @@ def main():
                 # 첫 안내 메시지 바로 아래에 버튼 배치
                 if idx == 0:
                     render_quick_conflict_buttons()
-
-        st.markdown('</div>', unsafe_allow_html=True)
 
         placeholder = f"[{st.session_state.conflict_type}] 현재 상황을 입력해주세요."
 
