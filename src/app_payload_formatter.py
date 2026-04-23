@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 from src.app_rag_result_parser import (
+    CANONICAL_REPLY_LABELS,
+    canonical_reply_label,
     clean_text,
     extract_reply_candidates,
     normalize_sentence,
@@ -107,7 +109,7 @@ def normalize_recommended_replies(value: object) -> list[dict]:
         if not isinstance(item, dict):
             continue
 
-        label = clean_text(item.get("label"))
+        label = canonical_reply_label(item.get("label"))
         text = clean_text(item.get("text"))
         if not label or not text:
             continue
@@ -122,6 +124,61 @@ def normalize_recommended_replies(value: object) -> list[dict]:
         )
 
     return normalized
+
+
+def merge_reply_candidates(
+    reply_candidates: list[str],
+    recommended_replies: list[dict],
+) -> list[str]:
+    by_label: dict[str, str] = {}
+
+    for candidate in reply_candidates:
+        label, text = _reply_text_from_candidate(candidate)
+        if label and text and label not in by_label:
+            by_label[label] = text
+
+    for reply in recommended_replies:
+        label = canonical_reply_label(reply.get("label"))
+        text = clean_text(reply.get("text"))
+        if label and text and label not in by_label:
+            by_label[label] = text
+
+    merged = [
+        f"[{label}] {by_label[label]}"
+        for label in CANONICAL_REPLY_LABELS
+        if label in by_label
+    ]
+    if merged:
+        return merged
+
+    return reply_candidates
+
+
+def _reply_text_from_candidate(candidate: str) -> tuple[str, str]:
+    text = clean_text(candidate)
+    if not text.startswith("[") or "]" not in text:
+        return "", text
+    label, body = text[1:].split("]", 1)
+    canonical_label = canonical_reply_label(label)
+    return canonical_label, clean_text(body)
+
+
+def build_assistant_message(reply_candidates: list[str], result_text: str) -> str:
+    if not reply_candidates:
+        return result_text
+
+    sections: list[str] = []
+    used_labels: set[str] = set()
+    for candidate in reply_candidates:
+        label, text = _reply_text_from_candidate(candidate)
+        if not label or not text or label in used_labels:
+            continue
+        used_labels.add(label)
+        sections.append(f"[{label}]\n{text}")
+        if len(sections) == len(CANONICAL_REPLY_LABELS):
+            break
+
+    return "\n\n".join(sections) if sections else reply_candidates[0]
 
 
 def normalize_text_list(value: object) -> list[str]:
@@ -159,11 +216,7 @@ def build_text_analysis_payload(
         rag_result.get("recommended_replies")
     )
     reply_candidates = extract_reply_candidates(result_text, response_examples)
-    if not reply_candidates and recommended_replies:
-        reply_candidates = [
-            f"[{reply['label']}] {reply['text']}"
-            for reply in recommended_replies
-        ]
+    reply_candidates = merge_reply_candidates(reply_candidates, recommended_replies)
     gemini_reply_candidates = normalize_text_list(
         gemini_auxiliary.get("reply_candidates")
         or emotion_risk_result.get("reply_candidates")
@@ -200,7 +253,7 @@ def build_text_analysis_payload(
             or emotion_risk_result.get("alternative")
         )
     retrieved_cases = format_retrieved_cases(rag_result.get("retrieved_docs", []))
-    assistant_message = reply_candidates[0] if reply_candidates else result_text
+    assistant_message = build_assistant_message(reply_candidates, result_text)
 
     return {
         "user_input": user_input,
