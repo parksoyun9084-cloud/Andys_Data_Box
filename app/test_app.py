@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import re
 import streamlit as st
 
 # 프로젝트 루트를 import 경로에 추가
@@ -28,7 +29,7 @@ def apply_custom_css():
         }
 
         .block-container{
-            padding-top:1rem;
+            padding-top:3rem;
             padding-bottom:1rem;
         }
 
@@ -39,6 +40,7 @@ def apply_custom_css():
             padding:15px 25px;
             background:#FFF0F3;
             border-bottom:1px solid #eee;
+            margin-top:10px;
             margin-bottom:20px;
             border-radius:12px;
         }
@@ -52,46 +54,8 @@ def apply_custom_css():
         .section-title {
             font-size:18px;
             font-weight:700;
-            margin-bottom:12px;
-        }
-
-        .chat-shell{
-            background:#ffffff;
-            border-radius:22px;
-            padding:16px;
-            border:1px solid #ECEDEF;
-            box-shadow:0 4px 14px rgba(0,0,0,0.04);
-        }
-
-        .assistant-card{
-            background:#F3F4F6;
-            border-radius:22px;
-            padding:18px;
-            border:1px solid #ECEDEF;
-            margin-bottom:14px;
-        }
-
-        .assistant-head{
-            display:flex;
-            align-items:center;
-            gap:10px;
-        }
-
-        .assistant-avatar{
-            font-size:30px;
-        }
-
-        .assistant-name{
-            font-size:18px;
-            font-weight:800;
-            color:#191919;
-        }
-
-        .assistant-desc{
-            font-size:14px;
-            color:#666;
-            line-height:1.7;
-            margin-top:3px;
+            margin-bottom:16px;
+            color:#212529;
         }
 
         .selected-mode-badge{
@@ -347,7 +311,7 @@ def render_phrase_box(title: str, items: list[str], empty_text: str):
 
 
 def get_risk_color(label: str) -> str:
-    if label in ["심각", "위험"]:
+    if label in ["심각", "위험", "높음"]:
         return "#E74C3C"
     if label in ["경고", "주의", "보통"]:
         return "#F08C00"
@@ -370,6 +334,7 @@ def get_risk_description(label: str) -> str:
         "위험": "자극적인 표현을 피하고 감정 진정이 우선입니다.",
         "심각": "즉각적인 설득보다 상황 진정이 더 중요합니다.",
         "보통": "표현을 조심하면 충분히 대화를 이어갈 수 있습니다.",
+        "높음": "자극적인 표현을 피하고 대화를 차분히 이어가는 게 좋습니다.",
     }
     return mapping.get(label, "현재 대화 흐름을 조심스럽게 이어가는 것이 좋습니다.")
 
@@ -460,6 +425,26 @@ def render_quick_conflict_buttons():
         st.rerun()
 
 
+def extract_style_reply(text: str, label: str) -> str:
+    if not text:
+        return ""
+
+    safe_text = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    escaped = re.escape(label).replace(r"\ ", r"\s*")
+
+    patterns = [
+        rf"\[\s*{escaped}\s*\]\s*(.*?)(?=\n\s*\[|$)",
+        rf"{escaped}\s*[:：]\s*(.*?)(?=\n\s*(?:\[|공감형|조언형|갈등\s*완충형)|$)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, safe_text, re.S)
+        if match:
+            return match.group(1).strip()
+
+    return ""
+
+
 def main():
     apply_custom_css()
     init_session_state()
@@ -472,8 +457,7 @@ def main():
     col_chat, col_report = st.columns([1.05, 1])
 
     with col_chat:
-        with st.container(height=550):
-
+        with st.container(height=700):
             for idx, msg in enumerate(st.session_state.messages):
                 is_user = msg["role"] == "user"
                 avatar = "👩🏻‍❤️‍🧑🏻" if is_user else msg.get("avatar", "🎁")
@@ -488,7 +472,6 @@ def main():
                     </div>
                 """, unsafe_allow_html=True)
 
-                # 첫 안내 메시지 바로 아래에 버튼 배치
                 if idx == 0:
                     render_quick_conflict_buttons()
 
@@ -518,13 +501,24 @@ def main():
                 result["user_input"] = prompt
                 result["conflict_type"] = st.session_state.conflict_type
 
+                assistant_raw = clean_display_text(
+                    result.get("assistant_message") or result.get("result_text") or ""
+                )
+
+                chat_preview = "분석이 완료됐어요. 오른쪽 패널에서 감정, 위험도, 추천 답변을 확인해보세요."
+
+                result["assistant_message"] = assistant_raw
                 st.session_state.latest_result = result
+
                 st.session_state.messages.append({
                     "role": "assistant",
                     "avatar": "🎁",
-                    "content": clean_display_text(result["assistant_message"])
+                    "content": chat_preview
                 })
-                st.session_state.history.insert(0, result)
+                st.session_state.history.insert(0, {
+                    **result,
+                    "chat_preview": chat_preview,
+                })
 
             except Exception as e:
                 st.session_state.error_message = str(e)
@@ -537,22 +531,25 @@ def main():
             st.rerun()
 
     with col_report:
-        st.markdown('<div class="section-title">AI 분석 결과</div>', unsafe_allow_html=True)
+        with st.container(height=700):
+            st.markdown('<div class="section-title">AI 분석 결과</div>', unsafe_allow_html=True)
 
-        with st.container(height=760):
             latest = st.session_state.latest_result
 
             emotion_label, emotion_score, emotion_emoji, emotion_desc = "대기 중", 0, "🙂", "입력 시 분석을 시작합니다."
             risk_label, risk_score, risk_color, risk_desc = "대기 중", 0, "#ADB5BD", "갈등 위험도를 측정합니다."
 
             if latest:
-                emotion_label = clean_display_text(latest["emotion"]["label"])
-                emotion_score = latest["emotion"]["score"]
+                emotion_info = latest.get("emotion", {}) if isinstance(latest.get("emotion"), dict) else {}
+                risk_info = latest.get("risk", {}) if isinstance(latest.get("risk"), dict) else {}
+
+                emotion_label = clean_display_text(emotion_info.get("label", latest.get("main_emotion", "대기 중")))
+                emotion_score = int(emotion_info.get("score", 0))
                 emotion_emoji = get_emotion_emoji(emotion_label)
                 emotion_desc = get_emotion_description(emotion_label)
 
-                risk_label = clean_display_text(latest["risk"]["label"])
-                risk_score = latest["risk"]["score"]
+                risk_label = clean_display_text(risk_info.get("label", latest.get("risk_level", "대기 중")))
+                risk_score = int(risk_info.get("score", 0))
                 risk_color = get_risk_color(risk_label)
                 risk_desc = get_risk_description(risk_label)
 
@@ -569,29 +566,21 @@ def main():
 
             if latest:
                 render_text_box("갈등유형", latest.get("conflict_type", "미선택"))
-                render_text_box("상황 요약", latest.get("summary_text", ""))
-                render_text_box("감정 해석", latest.get("emotion_text", ""))
-                if latest["risk"].get("recommendation"):
-                    render_text_box("대응 가이드", latest["risk"]["recommendation"])
+                render_text_box("상황 요약", latest.get("summary_text") or latest.get("situation_summary", ""))
+                render_text_box("감정 해석", latest.get("emotion_text") or latest.get("main_emotion", ""))
+
+                risk_obj = latest.get("risk", {})
+                if isinstance(risk_obj, dict) and risk_obj.get("recommendation"):
+                    render_text_box("대응 가이드", risk_obj["recommendation"])
             else:
                 st.markdown(
                     '<div class="note-box">왼쪽 채팅창에서 갈등 유형을 선택하고 내용을 입력하면 결과가 표시됩니다.</div>',
                     unsafe_allow_html=True
                 )
 
-            import re
-
-            def extract_style_reply(text, label):
-                pattern = rf"\[{label}\]\s*(.*?)(?=\n\[|$)"
-                match = re.search(pattern, text, re.S)
-                if match:
-                    return match.group(1).strip()
-                return ""
-
             st.markdown("<strong>💡 AI 추천 답변</strong>", unsafe_allow_html=True)
 
             if latest and latest.get("assistant_message"):
-
                 raw = latest["assistant_message"]
 
                 styles = [
@@ -600,11 +589,14 @@ def main():
                     ("갈등 완충형", "🤝"),
                 ]
 
-                for idx, (label, icon) in enumerate(styles, 1):
+                found_count = 0
+
+                for label, icon in styles:
                     reply = extract_style_reply(raw, label)
 
                     if reply:
-                        safe = clean_display_text(reply).replace("\n", "<br>")
+                        found_count += 1
+                        safe = clean_display_text(reply).replace("\n", "<br>").replace("`", "'")
 
                         st.markdown(f"""
                             <div class="list-item">
@@ -616,6 +608,9 @@ def main():
                                 onclick='copyToClipboard(`{safe}`)'>복사</button>
                             </div>
                         """, unsafe_allow_html=True)
+
+                if found_count == 0:
+                    st.info("추천 답변을 불러오지 못했습니다. assistant_message 형식을 확인해보세요.")
 
             else:
                 st.info("분석 후 추천 답변이 표시됩니다.")
@@ -640,11 +635,13 @@ def main():
             if st.session_state.history:
                 for idx, item in enumerate(st.session_state.history[:3]):
                     title = f"[{item.get('conflict_type','미선택')}] {item.get('user_input','')[:24]}"
+                    preview_text = item.get("chat_preview") or "오른쪽 패널에서 결과를 확인해보세요."
+
                     render_history_item(
                         "👩🏻‍❤️‍🧑🏻",
                         title,
                         "방금" if idx == 0 else f"{idx+1}전",
-                        item.get("assistant_message", "")[:70],
+                        preview_text,
                         idx == 0
                     )
             else:
