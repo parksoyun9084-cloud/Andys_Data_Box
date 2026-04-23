@@ -7,6 +7,7 @@
 # - 연애/관계 갈등 전용 입력 분류 게이트 추가
 # - 질문 정규화(normalize) 추가
 # - 검색 결과 연인 관계 필터링 추가
+# - 공감형 / 조언형 / 갈등 완충형 예시 선택 로직 보정
 # ============================================================
 
 from pathlib import Path
@@ -46,7 +47,7 @@ TARGET_RESPONSE_STYLES = ("공감형", "조언형", "갈등 완충형")
 
 
 # ============================================================
-# 3. 유틸
+# 2. 유틸
 # ============================================================
 def clean_text(value) -> str:
     if pd.isna(value):
@@ -66,6 +67,7 @@ def classify_relationship_query(question: str) -> str:
         return "relationship"
 
     return "unknown"
+
 
 def normalize_relationship_query(question: str) -> str:
     q = clean_text(question)
@@ -92,13 +94,11 @@ def normalize_relationship_query(question: str) -> str:
 
     return " ".join(expanded)
 
+
 def build_search_query(question: str, conflict_type: str = "") -> str:
     base = normalize_relationship_query(question)
 
-    query_parts = []
-
-    # only add global intent if weak query
-    query_parts.append(base)
+    query_parts = [base]
 
     if conflict_type:
         query_parts.append(conflict_type)
@@ -130,7 +130,7 @@ def extract_keywords_from_question(question: str) -> list[str]:
 
 
 # ============================================================
-# 4. 데이터/모델 로드
+# 3. 데이터/모델 로드
 # ============================================================
 def load_dataframes() -> tuple[pd.DataFrame, pd.DataFrame]:
     if not RAG_TEXT_PATH.exists():
@@ -202,7 +202,7 @@ def load_llm(openai_api_key: str) -> ChatOpenAI:
 
 
 # ============================================================
-# 5. 검색 함수
+# 4. 검색 함수
 # ============================================================
 def bm25_search(query: str, rag_df: pd.DataFrame, bm25: Any, k: int = 3) -> list[dict]:
     tokenized_query = query.split()
@@ -326,15 +326,12 @@ def retrieve_documents(
 
     search_k = max(k * 4, 12)
 
-    # 1. Dense retrieval (semantic)
     dense_results = dense_search(question, vector_db=vector_db, k=search_k)
 
-    # 2. BM25 retrieval (lexical)
     bm25_results = []
     if bm25 is not None and rag_df is not None:
         bm25_results = bm25_search(question, rag_df=rag_df, bm25=bm25, k=search_k)
 
-    # 3. Fusion layer (RRF)
     if method == "rrf":
         fused = reciprocal_rank_fusion(
             [bm25_results, dense_results],
@@ -345,13 +342,13 @@ def retrieve_documents(
     else:
         fused = dense_results
 
-    # 4. HARD FILTER
     fused = filter_relationship_documents(fused, k=search_k)
 
-    # 5. FINAL RERANK
     return fused[:k]
+
+
 # ============================================================
-# 6. 감정 / 위험도 / 상황 요약
+# 5. 감정 / 위험도 / 상황 요약
 # ============================================================
 def get_main_emotion(question: str, retrieved_docs: list[dict]) -> str:
     question_emotion = infer_emotion_from_question(question)
@@ -419,9 +416,8 @@ def summarize_current_situation(question: str, retrieved_docs: list[dict]) -> st
 
 
 # ============================================================
-# 7. response example 연결
+# 6. response example 연결
 # ============================================================
-
 def filter_response_examples_by_dialogue_ids(
     response_df: pd.DataFrame,
     dialogue_ids: list[str]
@@ -491,23 +487,23 @@ def map_listener_empathy_to_response_styles(listener_empathy: str) -> list[str]:
 
     styles = []
 
-    # 공감형 (감정 반응 중심)
-    if any(k in empathy_text for k in ["위로", "동조"]):
+    has_empathy = any(k in empathy_text for k in ["위로", "동조"])
+    has_advice = any(k in empathy_text for k in ["조언", "격려", "방법", "해결", "해보자"])
+    has_buffer = any(k in empathy_text for k in ["완화", "중재", "배려", "부드럽", "대화유지"])
+
+    if has_empathy:
         styles.append("공감형")
 
-    # 조언형 (문제 해결/방향 제시)
-    if any(k in empathy_text for k in ["조언", "격려", "방법", "해결", "해보자"]):
+    if has_advice:
         styles.append("조언형")
 
-    # 갈등 완충형 (감정+조언 혼합)
-    if any(k in empathy_text for k in ["위로", "동조", "조언", "격려"]):
+    if has_buffer or (has_empathy and has_advice):
         styles.append("갈등 완충형")
 
-    return list(set(styles))
+    return list(dict.fromkeys(styles))
 
 
 def score_response_style_match(row: pd.Series, target_style: str) -> int:
-
     listener_empathy = clean_text(row.get("listener_empathy", ""))
     listener_response = clean_text(row.get("listener_response", ""))
     response_example_text = clean_text(row.get("response_example_text", ""))
@@ -516,36 +512,25 @@ def score_response_style_match(row: pd.Series, target_style: str) -> int:
 
     score = 0
 
-    # ✅ 핵심: 해당 스타일이 아니면 강하게 감점
     if target_style not in mapped_styles:
         score -= 5
     else:
         score += 8
 
-    # =========================
-    # 공감형
-    # =========================
     if target_style == "공감형":
         if any(k in listener_empathy for k in ["위로", "동조"]):
             score += 5
         if any(k in listener_response for k in ["속상", "힘들", "서운", "이해"]):
             score += 3
 
-    # =========================
-    # 조언형
-    # =========================
     elif target_style == "조언형":
         if any(k in listener_empathy for k in ["조언", "격려", "방법", "해결"]):
             score += 6
-
         if any(k in listener_response for k in ["해보", "시도", "천천히", "같이", "방법"]):
             score += 4
 
-    # =========================
-    # 갈등 완충형
-    # =========================
     elif target_style == "갈등 완충형":
-        if any(k in listener_empathy for k in ["조언", "격려", "위로", "동조"]):
+        if any(k in listener_empathy for k in ["조언", "격려", "위로", "동조", "완화", "중재", "배려"]):
             score += 4
 
         soft_text = listener_response + " " + response_example_text
@@ -553,15 +538,13 @@ def score_response_style_match(row: pd.Series, target_style: str) -> int:
         if not any(k in soft_text for k in ["왜", "맨날", "항상", "네가", "니가"]):
             score += 4
 
-        # 중립 + 완화 표현이면 추가 점수
-        if any(k in soft_text for k in ["괜찮", "이해", "천천히", "같이"]):
+        if any(k in soft_text for k in ["괜찮", "이해", "천천히", "같이", "부담", "편할 때"]):
             score += 3
 
     return score
 
 
 def _response_text_from_row(row: pd.Series) -> str:
-
     listener_response = clean_text(row.get("listener_response", ""))
 
     if listener_response:
@@ -611,9 +594,9 @@ def build_response_example_candidates(
 
 
 def select_style_labeled_response_examples(
-    candidate_df,
+    candidate_df: pd.DataFrame | None,
     target_styles=TARGET_RESPONSE_STYLES,
-):
+) -> list[dict]:
     if candidate_df is None or candidate_df.empty:
         return []
 
@@ -621,16 +604,13 @@ def select_style_labeled_response_examples(
     used_texts = set()
 
     for style in target_styles:
-
         rows = []
 
         for _, row in candidate_df.iterrows():
-
             mapped = map_listener_empathy_to_response_styles(
                 row.get("listener_empathy", "")
             )
 
-            # 핵심: 해당 스타일만 후보 인정
             if style not in mapped:
                 continue
 
@@ -648,7 +628,7 @@ def select_style_labeled_response_examples(
 
         if rows:
             best = rows[0][1]
-            text = _response_text_from_row(최고)
+            text = _response_text_from_row(best)
 
             used_texts.add(text)
 
@@ -660,8 +640,8 @@ def select_style_labeled_response_examples(
 
     return selected
 
-def format_labeled_response_examples(recommended_replies: list[dict]) -> str:
 
+def format_labeled_response_examples(recommended_replies: list[dict]) -> str:
     return "\n\n".join([
         f"[응답 예시 {i + 1} - {r['label']}]\n{r['text']}"
         for i, r in enumerate(recommended_replies)
@@ -724,7 +704,10 @@ def get_response_examples(
         else "listener_response"
     )
 
-    selected = candidate_df.head(top_n)[text_col].astype(str).tolist()
+    selected = candidate_df.sort_values(
+        by="score",
+        ascending=False
+    ).head(top_n)[text_col].astype(str).tolist()
 
     return "\n\n".join([
         f"[응답 예시 {i + 1}]\n{ex}"
@@ -733,11 +716,9 @@ def get_response_examples(
 
 
 def format_docs(docs: list[dict]) -> str:
-
     formatted = []
 
     for i, doc in enumerate(docs, start=1):
-
         block = [
             f"[유사 사례 {i}]",
             f"dialogue_id: {doc.get('dialogue_id', '')}",
@@ -752,8 +733,9 @@ def format_docs(docs: list[dict]) -> str:
 
     return "\n\n".join(formatted)
 
+
 # ============================================================
-# 8. 프롬프트
+# 7. 프롬프트
 # ============================================================
 PROMPT = PromptTemplate.from_template(
 """
@@ -777,6 +759,7 @@ PROMPT = PromptTemplate.from_template(
 - 각 답변은 2~4문장
 - 첫 문장은 사용자의 감정을 이해하는 말로 시작할 것
 - 유사 사례와 응답 예시는 참고만 하고 그대로 복사 금지
+- 아래 태그 형식을 반드시 정확히 지킬 것: [공감형], [조언형], [갈등 완충형]
 
 --------------------------------------------------
 [스타일 정의]
@@ -847,19 +830,18 @@ PROMPT = PromptTemplate.from_template(
 
 
 # ============================================================
-# 9. 메인 생성 함수
+# 8. 메인 생성 함수
 # ============================================================
 def generate_recommended_reply(
     question: str,
     conflict_type: str = "",
-    method="rrf",
+    method: str = "rrf",
     k: int = 3,
     use_local_csv: bool = False,
 ) -> dict:
 
     openai_api_key = load_api_key()
 
-    # 1. gate
     query_type = classify_relationship_query(question)
     if query_type != "relationship":
         return {
@@ -868,7 +850,6 @@ def generate_recommended_reply(
             "result_text": "연애/커플 상황이 아닙니다."
         }
 
-    # 2. load resources
     rag_df = response_df = bm25 = None
 
     if use_local_csv or method in ("bm25", "rrf"):
@@ -879,7 +860,6 @@ def generate_recommended_reply(
     example_vector_db = load_example_vector_db(openai_api_key)
     llm = load_llm(openai_api_key)
 
-    # 3. search
     search_query = build_search_query(question, conflict_type)
 
     retrieved_docs = retrieve_documents(
@@ -891,7 +871,6 @@ def generate_recommended_reply(
         k=k,
     )
 
-    # 4. enrich
     situation_summary = summarize_current_situation(question, retrieved_docs)
     main_emotion = get_main_emotion(question, retrieved_docs)
     risk_level = get_main_risk_level(retrieved_docs)
@@ -906,7 +885,6 @@ def generate_recommended_reply(
         example_vector_db=example_vector_db,
     )
 
-    # 5. prompt
     prompt = PROMPT.format(
         question=question,
         situation_summary=situation_summary,
@@ -930,8 +908,9 @@ def generate_recommended_reply(
         "result_text": result.content,
     }
 
+
 # ============================================================
-# 10. 단독 실행 테스트
+# 9. 단독 실행 테스트
 # ============================================================
 def main() -> None:
     test_question = "남자친구가 내 말을 제대로 안 들어주는 것 같아서 서운해. 어떻게 보내면 좋을까?"
