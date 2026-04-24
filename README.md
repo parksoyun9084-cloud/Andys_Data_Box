@@ -8,37 +8,48 @@
 
 ## 📌 목차
 
-0. How to Run
-1. Team
-2. 프로젝트 개요
-3. 시스템 아키텍처
-4. 데이터 전처리
-5. RAG 기반 시스템
-6. 테스트 및 평가
-7. Streamlit UI
-8. 프로젝트 구조
-9. 주요 차별점
-10. 한계 및 개선 방향
-11. 동료 회고
+0. [How to Run](#0-how-to-run)
+1. [Team](#1-team)
+2. [프로젝트 개요](#2-프로젝트-개요)
+3. [시스템 아키텍처](#3-시스템-아키텍처)
+4. [데이터 전처리](#4-데이터-전처리)
+5. [RAG 기반 시스템](#5-rag-기반-시스템)
+6. [테스트 및 평가](#6-테스트-및-평가)
+7. [Streamlit UI](#7-streamlit-ui)
+8. [프로젝트 구조](#8-프로젝트-구조)
+9. [주요 차별점](#9-주요-차별점)
+10. [한계 및 개선 방향](#10-한계-및-개선-방향)
+11. [동료 회고](#11-동료-회고)
 
 ---
 
 ## 0. How to Run
 
-<pre>
-# 1. 환경 설정
+### 배포 서비스
+🔗( https://andysdatabox-7tb38xujsfiq3uaiwdr9na.streamlit.app/ )
+
+별도의 설치 없이 웹에서 바로 사용 가능합니다.
+
+---
+
+### 💻 로컬 실행 방법
+```bash
+1. 환경 설정
 conda env create -f environment.yml
 conda activate <env_name>
 
-# 2. 환경 변수 설정
-cp .env.example .env
-# OPENAI_API_KEY / GEMINI_API_KEY 입력
+2. API Key 설정
+.streamlit/secrets.toml 파일 생성 후 아래 값 입력
 
-# 3. 실행
+OPENAI_API_KEY="your_openai_api_key"
+GEMINI_API_KEY="your_gemini_api_key"
+PINECONE_API_KEY="your_pinecone_api_key"
+
+** PINECONE_API_KEY는 요청 시 제공 **
+
+3. 실행
 streamlit run app/streamlit_app.py
-</pre>
-
-🔗 (https://andysdatabox-7tb38xujsfiq3uaiwdr9na.streamlit.app/)
+```
 
 ---
 
@@ -48,39 +59,97 @@ streamlit run app/streamlit_app.py
 
 <table align="center">
   <tr>
-    <td align="center" width="125">
-      <img src="app/figures/렉스.jpg" width="80"><br>
-      <b>김용욱</b><br>
-      <a href="https://github.com/yonguk12077-beep">@yonguk12077-beep</a>
+    <td align="center" width="170" valign="top">
+      <table>
+        <tr>
+          <td align="center" height="130">
+            <img src="app/figures/렉스.jpg" width="100" height="110" style="object-fit:contain; border-radius:10px;">
+          </td>
+        </tr>
+        <tr>
+          <td align="center"><b>김용욱</b></td>
+        </tr>
+        <tr>
+          <td align="center"><a href="https://github.com/yonguk12077-beep">@yonguk12077-beep</a></td>
+        </tr>
+      </table>
     </td>
-    <td align="center" width="125">
-      <img src="app/figures/우디.jpg" width="80"><br>
-      <b>박소윤</b><br>
-      <a href="https://github.com/parksoyun9084-cloud">@parksoyun9084-cloud</a>
+    <td align="center" width="170" valign="top">
+      <table>
+        <tr>
+          <td align="center" height="130">
+            <img src="app/figures/우디.jpg" width="100" height="110" style="object-fit:contain; border-radius:10px;">
+          </td>
+        </tr>
+        <tr>
+          <td align="center"><b>박소윤</b></td>
+        </tr>
+        <tr>
+          <td align="center"><a href="https://github.com/parksoyun9084-cloud">@parksoyun9084-cloud</a></td>
+        </tr>
+      </table>
     </td>
-    <td align="center" width="125">
-      <img src="app/figures/미스터샤크.jpg" width="80"><br>
-      <b>윤찬호</b><br>
-      <a href="https://github.com/ch3477-sudo">@ch3477-sudo</a>
+    <td align="center" width="170" valign="top">
+      <table>
+        <tr>
+          <td align="center" height="130">
+            <img src="app/figures/미스터샤크.jpg" width="100" height="110" style="object-fit:contain; border-radius:10px;">
+          </td>
+        </tr>
+        <tr>
+          <td align="center"><b>윤찬호</b></td>
+        </tr>
+        <tr>
+          <td align="center"><a href="https://github.com/ch3477-sudo">@ch3477-sudo</a></td>
+        </tr>
+      </table>
     </td>
-    <td align="center" width="125">
-      <img src="app/figures/저그 황제.jpg" width="80"><br>
-      <b>전승권</b><br>
-      <a href="https://github.com/eaent">@eaent</a>
+    <td align="center" width="170" valign="top">
+      <table>
+        <tr>
+          <td align="center" height="130">
+            <img src="app/figures/저그 황제.jpg" width="100" height="110" style="object-fit:contain; border-radius:10px;">
+          </td>
+        </tr>
+        <tr>
+          <td align="center"><b>전승권</b></td>
+        </tr>
+        <tr>
+          <td align="center"><a href="https://github.com/eaent">@eaent</a></td>
+        </tr>
+      </table>
     </td>
   </tr>
 </table>
 
 ## 역할 분담
 
-| 이름 | 역할 |
-|------|------|
-| 김용욱 | Vector DB 구축 / 프롬프트 설계 / RAG 파이프라인 구성 / 답변 추천 구조 기본 구성 |
-| 박소윤 | 서비스 기획·아키텍처 설계 / RAG·감정·위험도 통합 AI 로직 설계 / Streamlit 구현 및 기능 연동 / 데이터 구조 및 문서화 설계 / 일정·마일스톤 관리|
-| 윤찬호 | 데이터 전처리 / RAG 검색 구조 비교 / Retrieval 성능 평가 / 답변 추천 흐름 개선 |
-| 전승권 | 환경설정 / API / 앱 구조 |
-
----
+<table>
+  <thead>
+    <tr>
+      <th width="120">이름</th>
+      <th>역할</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>김용욱</b></td>
+      <td>Vector DB 구축 / 프롬프트 설계 / RAG 파이프라인 구성 / 답변 추천 구조 기본 구성</td>
+    </tr>
+    <tr>
+      <td align="center"><b>박소윤</b></td>
+      <td>서비스 기획·아키텍처 설계 / RAG·감정·위험도 통합 AI 로직 설계 / Streamlit 구현 및 기능 연동 / 데이터 구조 및 문서화 설계 / 일정·마일스톤 관리</td>
+    </tr>
+    <tr>
+      <td align="center"><b>윤찬호</b></td>
+      <td>데이터 전처리 / RAG 검색 구조 비교 / Retrieval 성능 평가 / 답변 추천 흐름 개선</td>
+    </tr>
+    <tr>
+      <td align="center"><b>전승권</b></td>
+      <td>환경설정 / API 연동 / 앱 구조 정리</td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
@@ -143,12 +212,15 @@ streamlit run app/streamlit_app.py
 ### 5-1. 구조
 
 - BM25 (키워드 검색)
-- Dense (임베딩 기반 검색)
+- Dense Embedding (OpenAI)
 - RRF 결합
+
+### 5-2. Vector DB
+- Pinecone 기반 Vector DB 구축
 
 ### 5-2. 효과
 
-- 환각 감소
+- LLM 환각 감소
 - 실제 사례 기반 답변 생성
 - 상황 적합도 향상
 
@@ -195,7 +267,7 @@ project/
 
 ## 9. 주요 차별점
 
-- 단순 챗봇이 아닌 답장 생성 시스템
+- 단순 챗봇이 아닌 “답장 생성 시스템”
 - 감정 + 위험도 기반 대응 전략
 - RAG 기반 상황 이해
 - 실제 메시지 스타일 출력
@@ -204,98 +276,109 @@ project/
 
 ## 10. 한계 및 개선 방향
 
-- 데이터 다양성 부족
-- 감정 분석 정확도 개선 필요
-- 실시간 대화 기능 확장 가능
+### 10-1. 한계
+- 감정 분석에서 일부 미묘한 감정 구분 한계 존재
+- 데이터셋이 연인 관계 중심으로 제한됨
+- LLM 응답 형식 불안정성 존재
+- RAG 검색 결과 품질이 입력 표현에 영향 받음
+
+### 10-2. 개선 방향
+- 감정 분류 세분화 (multi-label emotion)
+- 데이터셋 확장 (다양한 관계 포함)
+- RAG reranking 고도화
+- 실시간 대화 흐름 추적 기능 추가
+- 사용자 맞춤형 답변 스타일 적용 (personalization)
 
 ---
 
 ## 11. 동료 회고
 
-<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 30px;">
-    <thead>
-        <tr style="background-color: #f8f9fa;">
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">작성자</th>
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">대상자</th>
-            <th style="border: 1px solid #ddd; padding: 10px;">회고 내용</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td rowspan="4" style="text-align: center; font-weight: bold; border: 1px solid #ddd;">김용욱</td>
-            <td style="text-align: center; border: 1px solid #ddd;">박소윤</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">프로젝트 내에서 주도적으로 회의를 이끌어나가면서 모두가 좋은 의견을 내어 최고의 방안을 선택해 나갈 수 있게 진행 간 좋은 리더십을 보여주셨으며 리드미 작성 및 스트림릿 초기 구성안에 대해 좋은 의견을 내주셔서 팀원들이 좀 더 빠른 진행을 할 수 있게 큰 도움을 주셨습니다.</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">윤찬호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">데이터 전처리와 주로 쓰일 후보문들과 대화 구조 정리를 담당해주셨으며, 프로젝트 진행 간 전처리 과정을 완료한 후 RAG 파이프라인을 보다 세분화되게 구성해주며 기존의 파이프라인과 병합하여 좀 더 세분화 된 구조를 보여주셨습니다. 또한 팀원분 중 막히는 부분이 있을 때 쉽게 설명해주며 보다 빠른 이해를 도와주셨습니다</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">전승권</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">프로젝트 간 감정 / 위험도 분석을 맡아주셨으며 분석 간 제일 중요했던 감정선의 기준과 관계 위험도의 기준을 잘 정해주셔서 결과값을 내는 데 있어서 프로젝트 간 추구하던 바를 순조롭게 나타낼 수 있게 큰 도움을 주셨으며 개발 간 팀원들한테 생긴 오류를 주도적으로 찾아보고 해결해주면서 진행 간 오류 해결로 지체되는 시간을 단축시켜주셨습니다.</td>
-        </tr>
-<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 30px;">
-    <thead>
-        <tr style="background-color: #f8f9fa;">
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">작성자</th>
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">대상자</th>
-            <th style="border: 1px solid #ddd; padding: 10px;">회고 내용</th>
-        </tr>
-    </thead>
-        <tr>
-            <td rowspan="4" style="text-align: center; font-weight: bold; border: 1px solid #ddd;">박소윤</td>
-            <td style="text-align: center; border: 1px solid #ddd;">김용욱</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">RAG 파이프라인 구축과 Vector DB 구성, 프롬프트 설계를 담당하여 검색과 답변 생성의 기반 구조를 구현해주었습니다. 특히 RAG 흐름 설계 과정에서 핵심 기능 개발에 기여해주었습니다.</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">윤찬호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">데이터 전처리와 RAG 검색 구조 비교, Retrieval 성능 평가를 담당하여 데이터 품질 확보와 검색 성능 개선에 기여해주었습니다. 전처리 과정 정리와 데이터 구조 이해에 도움이 되었습니다.</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">전승권</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">환경설정과 API 연동, 앱 구조 정리를 담당하여 프로젝트가 정상적으로 실행될 수 있는 기반을 마련해주었습니다. 개발 환경 구성과 기능 연결 과정에서 안정성 확보에 기여해주었습니다.</td>
-        </tr>
-<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 30px;">
-    <thead>
-        <tr style="background-color: #f8f9fa;">
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">작성자</th>
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">대상자</th>
-            <th style="border: 1px solid #ddd; padding: 10px;">회고 내용</th>
-        </tr>
-    </thead>
-        <tr>
-            <td rowspan="4" style="text-align: center; font-weight: bold; border: 1px solid #ddd;">윤찬호</td>
-            <td style="text-align: center; border: 1px solid #ddd;">김용욱</td>
-            <td style="border: 1px solid #ddd; padding: 10px;"> Vector DB 구축과 프롬프트 설계를 진행해 주시고, RAG 문서 검색 파이프라인 구성에도 기여해 주셔서 프로젝트 완성도 향상에 큰 도움이 되었습니다.</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">박소윤</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">프로젝트 주제 선정과 역할 분배 같은 의견 조율 과정에서 먼저 나서 주셔서, 팀이 방향을 빠르게 정하고 원활하게 출발할 수 있었습니다.</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">전승권</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">갈등 상황에서 감정과 위험도를 분석하는 역할을 맡아, 프로젝트의 핵심 차별점을 잘 살려주셨습니다.</td>
-        </tr>
-<table style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; margin-bottom: 30px;">
-    <thead>
-        <tr style="background-color: #f8f9fa;">
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">작성자</th>
-            <th style="width: 15%; border: 1px solid #ddd; padding: 10px;">대상자</th>
-            <th style="border: 1px solid #ddd; padding: 10px;">회고 내용</th>
-        </tr>
-    </thead>
-        <tr>
-            <td rowspan="4" style="text-align: center; font-weight: bold; border: 1px solid #ddd;">전승권</td>
-            <td style="text-align: center; border: 1px solid #ddd;">김용욱</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">RAG 파트중 벡터DB 로컬에 생성을 깔끔하게 해주었다</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">박소윤</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">프로젝트 전반 의견표명이 확실,팀 역할 분배를 확실하게 함으로서 주도를 해주셔서 다행이였음</td>
-        </tr>
-        <tr>
-            <td style="text-align: center; border: 1px solid #ddd;">윤찬호</td>
-            <td style="border: 1px solid #ddd; padding: 10px;">전처리 데이터셋을 담당 함으로서 자료 준비수월하게 되어서 프로젝트 수행시 나쁘지않았다</td>
-        </tr>
-       
+<table>
+  <thead>
+    <tr>
+      <th width="120">작성자</th>
+      <th width="120">대상자</th>
+      <th>회고 내용</th>
+    </tr>
+  </thead>
+  <tbody>
+    <!-- 박소윤 -->
+    <tr>
+      <td rowspan="3" align="center"><b>박소윤</b></td>
+      <td align="center"><b>김용욱</b></td>
+      <td>RAG 파이프라인 구축과 Vector DB 구성, 프롬프트 설계를 담당하여 검색과 답변 생성의 기반 구조를 구현해주었습니다. 특히 RAG 흐름 설계 과정에서 핵심 기능 개발에 기여해주었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>윤찬호</b></td>
+      <td>데이터 전처리와 RAG 검색 구조 비교, Retrieval 성능 평가를 담당하여 데이터 품질 확보와 검색 성능 개선에 기여해주었습니다. 전처리 과정 정리와 데이터 구조 이해에 도움이 되었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>전승권</b></td>
+      <td>환경설정과 API 연동, 앱 구조 정리를 담당하여 프로젝트가 정상적으로 실행될 수 있는 기반을 마련해주었습니다. 개발 환경 구성과 기능 연결 과정에서 안정성 확보에 기여해주었습니다.</td>
+    </tr>
+<table>
+  <thead>
+    <tr>
+      <th width="120">작성자</th>
+      <th width="120">대상자</th>
+      <th>회고 내용</th>
+    </tr>
+    <!-- 김용욱 -->
+    <tr>
+      <td rowspan="3" align="center"><b>김용욱</b></td>
+      <td align="center"><b>박소윤</b></td>
+      <td>프로젝트 내에서 주도적으로 회의를 이끌어나가며 방향을 정리해주었고, README 작성 및 Streamlit 초기 구성안 제안으로 팀 진행에 큰 도움을 주었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>윤찬호</b></td>
+      <td>데이터 전처리와 후보 문장, 대화 구조 정리를 담당해주었고, RAG 파이프라인을 세분화하여 기존 구조와 병합하는 데 기여해주었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>전승권</b></td>
+      <td>감정 및 위험도 분석 기준을 정리해주었고, 개발 중 발생한 오류를 함께 해결하며 프로젝트 진행 속도를 높이는 데 도움을 주었습니다.</td>
+    </tr>
+<table>
+  <thead>
+    <tr>
+      <th width="120">작성자</th>
+      <th width="120">대상자</th>
+      <th>회고 내용</th>
+    </tr>
+    <!-- 윤찬호 -->
+    <tr>
+      <td rowspan="3" align="center"><b>윤찬호</b></td>
+      <td align="center"><b>김용욱</b></td>
+      <td>Vector DB 구축과 프롬프트 설계를 진행해주시고, RAG 문서 검색 파이프라인 구성에도 기여해주셔서 프로젝트 완성도 향상에 도움이 되었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>박소윤</b></td>
+      <td>프로젝트 주제 선정과 역할 분배 과정에서 먼저 나서주셔서 팀이 방향을 빠르게 정하고 원활하게 출발할 수 있었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>전승권</b></td>
+      <td>갈등 상황에서 감정과 위험도를 분석하는 역할을 맡아 프로젝트의 핵심 차별점을 잘 살려주었습니다.</td>
+    </tr>
+<table>
+  <thead>
+    <tr>
+      <th width="120">작성자</th>
+      <th width="120">대상자</th>
+      <th>회고 내용</th>
+    </tr>
+    <!-- 전승권 -->
+    <tr>
+      <td rowspan="3" align="center"><b>전승권</b></td>
+      <td align="center"><b>김용욱</b></td>
+      <td>RAG 파트에서 벡터 DB를 로컬 환경에 깔끔하게 생성해주었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>박소윤</b></td>
+      <td>프로젝트 전반에서 의견 표현이 명확했고, 역할 분배를 주도하여 팀 진행에 도움이 되었습니다.</td>
+    </tr>
+    <tr>
+      <td align="center"><b>윤찬호</b></td>
+      <td>전처리 데이터셋을 담당하여 자료 준비가 수월해졌고, 프로젝트 수행에 도움이 되었습니다.</td>
+    </tr>
+
+  </tbody>
 </table>
