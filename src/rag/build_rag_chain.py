@@ -8,11 +8,14 @@
 # - 질문 정규화(normalize) 추가
 # - 검색 결과 연인 관계 필터링 추가
 # - 공감형 / 조언형 / 갈등 완충형 예시 선택 로직 보정
+# - LLM 출력 태그 파싱 / 누락 스타일 자동 재생성 추가
+# - 상담형 문체 감지 / 답장형 검증 강화
 # ============================================================
 
 from pathlib import Path
 from collections import Counter, defaultdict
 from typing import Any
+import re
 
 import pandas as pd
 
@@ -50,9 +53,129 @@ TARGET_RESPONSE_STYLES = ("공감형", "조언형", "갈등 완충형")
 # 2. 유틸
 # ============================================================
 def clean_text(value) -> str:
+    if value is None:
+        return ""
     if pd.isna(value):
         return ""
     return str(value).strip()
+
+
+def normalize_section_label(label: str) -> str:
+    label = clean_text(label).replace(" ", "")
+    alias_map = {
+        "상황요약": "상황 요약",
+        "감정": "감정",
+        "위험도": "위험도",
+        "공감형": "공감형",
+        "조언형": "조언형",
+        "갈등완충형": "갈등 완충형",
+        "피해야할표현": "피해야 할 표현",
+        "대체표현": "대체 표현",
+    }
+    return alias_map.get(label, clean_text(label))
+
+
+def parse_llm_sections(text: str) -> dict[str, str]:
+    if not text:
+        return {}
+
+    safe_text = clean_text(text).replace("\r\n", "\n").replace("\r", "\n")
+
+    raw_labels = [
+        "상황 요약", "상황요약",
+        "감정",
+        "위험도",
+        "공감형",
+        "조언형",
+        "갈등 완충형", "갈등완충형",
+        "피해야 할 표현", "피해야할표현",
+        "대체 표현", "대체표현",
+    ]
+
+    pattern = r"\[\s*(" + "|".join(map(re.escape, raw_labels)) + r")\s*\]"
+    parts = re.split(pattern, safe_text)
+
+    sections: dict[str, str] = {}
+    for i in range(1, len(parts), 2):
+        raw_label = clean_text(parts[i])
+        content = clean_text(parts[i + 1]) if i + 1 < len(parts) else ""
+        normalized = normalize_section_label(raw_label)
+        sections[normalized] = content
+
+    return sections
+
+
+def split_lines_as_list(text: str) -> list[str]:
+    if not text:
+        return []
+
+    normalized = clean_text(text).replace("•", "\n• ").replace(" - ", "\n- ")
+    lines = []
+    for line in normalized.split("\n"):
+        cleaned = clean_text(line).lstrip("-").lstrip("•").strip()
+        if cleaned:
+            lines.append(cleaned)
+
+    return lines
+
+
+def is_reply_to_user_instead_of_partner(text: str) -> bool:
+    """
+    사용자를 위로하거나 상담하는 문체인지 감지한다.
+    목표는 '상대방에게 보낼 답장'이어야 하므로 이런 문체는 실패 처리한다.
+    """
+    t = clean_text(text)
+
+    counseling_phrases = [
+        "네가 느끼는",
+        "네 마음",
+        "많이 힘들었겠다",
+        "얼마나 힘들",
+        "이해해",
+        "당연해",
+        "지쳤겠",
+        "속상했겠",
+        "마음이 아플",
+        "그럴 수밖에 없",
+        "힘들 것 같",
+        "상처였을 것 같",
+        "그 상황이면",
+        "많이 속상했겠",
+        "정말 힘들겠",
+        "얼마나 속상",
+    ]
+
+    if t.startswith("너") or t.startswith("네가"):
+        return True
+
+    return any(x in t for x in counseling_phrases)
+
+
+def is_not_using_i_statement(text: str) -> bool:
+    """
+    답장은 기본적으로 '나/내/우리' 화법이어야 한다.
+    해당 표현이 전혀 없으면 훈계형/설명형일 가능성이 높다.
+    """
+    t = clean_text(text)
+
+    i_statement_tokens = ["나 ", "내 ", "나는", "내가", "내 입장", "우리", "나는 ", "내가 "]
+    return not any(token in t for token in i_statement_tokens)
+
+
+def ensure_style_labels_present(sections: dict[str, str]) -> bool:
+    if not all(clean_text(sections.get(style, "")) for style in TARGET_RESPONSE_STYLES):
+        return False
+
+    for style in TARGET_RESPONSE_STYLES:
+        text = clean_text(sections.get(style, ""))
+
+        if is_reply_to_user_instead_of_partner(text):
+            return False
+
+        if is_not_using_i_statement(text):
+            return False
+
+    return True
 
 
 def classify_relationship_query(question: str) -> str:
@@ -60,7 +183,7 @@ def classify_relationship_query(question: str) -> str:
 
     lover_keywords = [
         "남자친구", "여자친구", "남친", "여친", "썸",
-        "읽씹", "답장", "헤어지", "이별", "커플", "애인"
+        "읽씹", "답장", "헤어지", "이별", "커플", "애인", "연인"
     ]
 
     if any(k in q for k in lover_keywords):
@@ -113,7 +236,7 @@ def infer_emotion_from_question(question: str) -> str:
         return "슬픔"
     if any(kw in q for kw in ["화", "짜증", "무시", "열받"]):
         return "분노"
-    if any(kw in q for kw in ["불안", "걱정"]):
+    if any(kw in q for kw in ["불안", "걱정", "의심"]):
         return "불안"
     if any(kw in q for kw in ["답답", "지쳐"]):
         return "답답함"
@@ -124,7 +247,8 @@ def extract_keywords_from_question(question: str) -> list[str]:
     candidates = [
         "서운", "속상", "무시", "안 들어", "대충", "화", "상처",
         "답답", "공감", "진지", "읽씹", "답장", "회피", "장난", "집중",
-        "연락", "말다툼", "반복", "지쳐", "헤어지자", "잠수", "정떨어짐"
+        "연락", "말다툼", "반복", "지쳐", "헤어지자", "잠수", "정떨어짐",
+        "의심", "거짓말", "불안"
     ]
     return [kw for kw in candidates if kw in question]
 
@@ -302,7 +426,7 @@ def filter_relationship_documents(results: list[dict], k: int) -> list[dict]:
             score += 2
         if any(x in combined_text for x in ["남자친구", "여자친구", "커플"]):
             score += 2
-        if any(x in combined_text for x in ["연애", "이별", "싸움", "서운"]):
+        if any(x in combined_text for x in ["연애", "이별", "싸움", "서운", "의심"]):
             score += 1
 
         if score > 0:
@@ -487,7 +611,7 @@ def map_listener_empathy_to_response_styles(listener_empathy: str) -> list[str]:
 
     styles = []
 
-    has_empathy = any(k in empathy_text for k in ["위로", "동조"])
+    has_empathy = any(k in empathy_text for k in ["위로", "동조", "공감"])
     has_advice = any(k in empathy_text for k in ["조언", "격려", "방법", "해결", "해보자"])
     has_buffer = any(k in empathy_text for k in ["완화", "중재", "배려", "부드럽", "대화유지"])
 
@@ -518,7 +642,7 @@ def score_response_style_match(row: pd.Series, target_style: str) -> int:
         score += 8
 
     if target_style == "공감형":
-        if any(k in listener_empathy for k in ["위로", "동조"]):
+        if any(k in listener_empathy for k in ["위로", "동조", "공감"]):
             score += 5
         if any(k in listener_response for k in ["속상", "힘들", "서운", "이해"]):
             score += 3
@@ -530,7 +654,7 @@ def score_response_style_match(row: pd.Series, target_style: str) -> int:
             score += 4
 
     elif target_style == "갈등 완충형":
-        if any(k in listener_empathy for k in ["조언", "격려", "위로", "동조", "완화", "중재", "배려"]):
+        if any(k in listener_empathy for k in ["조언", "격려", "위로", "동조", "완화", "중재", "배려", "공감"]):
             score += 4
 
         soft_text = listener_response + " " + response_example_text
@@ -739,47 +863,54 @@ def format_docs(docs: list[dict]) -> str:
 # ============================================================
 PROMPT = PromptTemplate.from_template(
 """
-너는 연인 갈등 상황에서 사용자가 연인에게 보낼 답장을 추천하는 AI다.
+너는 연인 갈등 상황에서 사용자가 연인에게 실제로 보낼 답장을 추천하는 AI다.
 
 반드시 연인/커플/남녀 관계 갈등 상황으로만 해석할 것.
 미용실, 정치, 사회 일반 의미로 해석하지 말 것.
 사용자가 작성한 상황에 대해 혼자만의 상상으로 상황을 만들지 말 것.
 검색 결과가 없거나 관련성이 낮으면 검색 문서를 무시하고 사용자의 입력만을 기준으로 작성할 것.
 
-사용자가 연인과의 갈등 상황을 설명하면
-현재 상황 요약, 감정, 위험도,
-그리고 반드시 서로 다른 스타일의 AI 추천 답변 3개를 생성해야 한다.
+중요:
+너의 역할은 사용자를 위로하거나 상담하는 것이 아니다.
+반드시 "사용자가 상대방에게 직접 보낼 수 있는 메시지"를 작성해야 한다.
 
 --------------------------------------------------
 [핵심 규칙]
 - 공감형 / 조언형 / 갈등 완충형 3개 답변을 반드시 모두 작성할 것
+- 세 답변은 모두 "상대에게 보내는 답장"이어야 한다
 - 세 답변은 서로 문장 구조와 표현이 겹치면 안 된다
-- 각 답변은 실제 카톡에 바로 보낼 수 있게 자연스럽게 작성할 것
+- 각 답변은 실제 카톡에 바로 복붙할 수 있게 자연스럽게 작성할 것
+- 각 답변은 반드시 "문자 그대로 상대에게 보낼 수 있는 문장"만 작성할 것
+- 설명문 금지, 해설문 금지, 상담문 금지
 - 너무 상담사처럼 말하지 말 것
 - 공격적 / 비난 / 훈계 말투 금지
 - 각 답변은 2~4문장
-- 첫 문장은 사용자의 감정을 이해하는 말로 시작할 것
+- 답변은 반드시 "나 / 내" 화법을 기본으로 작성할 것
+- 필요하면 "너", "우리"를 사용할 수 있다
+- "네가 느끼는", "네 마음", "많이 힘들었겠다", "이해해", "당연해"처럼
+  사용자를 위로하는 상담형 문장은 쓰지 말 것
 - 유사 사례와 응답 예시는 참고만 하고 그대로 복사 금지
+- 참고 응답 예시는 "상대에게 보낼 메시지의 말투"만 참고할 것
 - 아래 태그 형식을 반드시 정확히 지킬 것: [공감형], [조언형], [갈등 완충형]
 
 --------------------------------------------------
 [스타일 정의]
 
 [공감형]
-- 감정 위로 중심
-- 해결책 제시하지 말 것
-- 서운함, 속상함, 답답함을 이해해주는 말투
+- 상대를 비난하지 않고 내 감정을 전달하는 답장
+- 해결책 제시보다 감정 전달이 중심
+- 예: 서운함, 속상함, 답답함을 "내 입장"에서 담백하게 표현
 
 [조언형]
+- 관계를 풀기 위해 내가 바라는 점이나 요청을 분명히 담는 답장
 - 문제 해결 중심
-- 어떻게 말하면 좋을지 제안
-- 행동 방법 제시
-- 공감은 짧게 1문장만
+- 어떻게 해줬으면 하는지 구체적으로 포함
+- 공감 표현은 짧게, 요청은 분명하게
 
 [갈등 완충형]
-- 싸움이 커지지 않도록 부드럽게 전달
-- 내 감정 + 상대 배려 동시 포함
-- 대화 이어갈 수 있게 작성
+- 싸움이 커지지 않도록 부드럽게 말하는 답장
+- 내 감정 + 상대 배려 + 대화 이어가기 포함
+- 부담스럽지 않게 대화의 문을 여는 말투
 
 --------------------------------------------------
 사용자 입력:
@@ -829,9 +960,124 @@ PROMPT = PromptTemplate.from_template(
 """
 )
 
+REPAIR_PROMPT = PromptTemplate.from_template(
+"""
+아래 초안은 연인 갈등 답변 추천 결과다.
+하지만 형식이 불완전하거나 일부 스타일이 누락되었거나,
+사용자에게 상담하듯 말하는 문장이 섞여 있거나,
+상대에게 바로 보낼 수 없는 설명형 문장이 들어 있다.
+
+너는 반드시 아래 8개 태그를 모두 포함해 다시 작성해야 한다.
+태그명은 한 글자도 바꾸지 마라.
+
+반드시 포함할 태그:
+[상황 요약]
+[감정]
+[위험도]
+[공감형]
+[조언형]
+[갈등 완충형]
+[피해야 할 표현]
+[대체 표현]
+
+중요 규칙:
+- 공감형 / 조언형 / 갈등 완충형은 반드시 모두 작성
+- 세 답변은 모두 "사용자가 상대방에게 직접 보내는 메시지"여야 함
+- 사용자에게 설명하거나 위로하는 상담형 문장 금지
+- "네가 느끼는", "네 마음", "많이 힘들었겠다", "이해해", "당연해" 금지
+- 답변은 "나 / 내" 화법 중심
+- 각 답변은 문자 그대로 상대에게 복붙 가능한 문장만 작성
+- 공감형은 감정 전달 중심
+- 조언형은 행동 요청 중심
+- 갈등 완충형은 감정 + 상대 배려 + 대화 연결
+- 각 답변은 2~4문장
+- 실제 카톡처럼 자연스럽게
+
+원래 사용자 질문:
+{question}
+
+보조 정보:
+상황 요약: {situation_summary}
+대표 감정: {main_emotion}
+위험도: {risk_level}
+
+초안:
+{draft}
+"""
+)
+
 
 # ============================================================
-# 8. 메인 생성 함수
+# 8. LLM 출력 보정
+# ============================================================
+def build_structured_result_from_sections(
+    question: str,
+    query_type: str,
+    search_query: str,
+    retrieved_docs: list[dict],
+    situation_summary: str,
+    main_emotion: str,
+    risk_level: str,
+    response_examples: str,
+    raw_text: str,
+    sections: dict[str, str],
+) -> dict:
+    return {
+        "question": question,
+        "query_type": query_type,
+        "search_query": search_query,
+        "retrieved_docs": retrieved_docs,
+        "situation_summary": situation_summary,
+        "main_emotion": main_emotion,
+        "risk_level": risk_level,
+        "response_examples": response_examples,
+        "result_text": raw_text,
+        "assistant_message": raw_text,
+        "summary_text": clean_text(sections.get("상황 요약")) or situation_summary,
+        "emotion_text": clean_text(sections.get("감정")) or main_emotion,
+        "risk_text": clean_text(sections.get("위험도")) or risk_level,
+        "empathy_reply": clean_text(sections.get("공감형")),
+        "advice_reply": clean_text(sections.get("조언형")),
+        "buffer_reply": clean_text(sections.get("갈등 완충형")),
+        "avoid_phrases": split_lines_as_list(sections.get("피해야 할 표현", "")),
+        "alternative_phrases": split_lines_as_list(sections.get("대체 표현", "")),
+        "parsed_sections": sections,
+    }
+
+
+def repair_llm_output_if_needed(
+    llm: ChatOpenAI,
+    question: str,
+    situation_summary: str,
+    main_emotion: str,
+    risk_level: str,
+    raw_text: str,
+) -> tuple[str, dict[str, str]]:
+    sections = parse_llm_sections(raw_text)
+
+    if ensure_style_labels_present(sections):
+        return raw_text, sections
+
+    repair_prompt = REPAIR_PROMPT.format(
+        question=question,
+        situation_summary=situation_summary,
+        main_emotion=main_emotion,
+        risk_level=risk_level,
+        draft=raw_text,
+    )
+
+    repaired = llm.invoke(repair_prompt)
+    repaired_text = clean_text(repaired.content)
+    repaired_sections = parse_llm_sections(repaired_text)
+
+    if ensure_style_labels_present(repaired_sections):
+        return repaired_text, repaired_sections
+
+    return raw_text, sections
+
+
+# ============================================================
+# 9. 메인 생성 함수
 # ============================================================
 def generate_recommended_reply(
     question: str,
@@ -848,7 +1094,17 @@ def generate_recommended_reply(
         return {
             "question": question,
             "query_type": query_type,
-            "result_text": "연애/커플 상황이 아닙니다."
+            "result_text": "연애/커플 상황이 아닙니다.",
+            "assistant_message": "연애/커플 상황이 아닙니다.",
+            "summary_text": "",
+            "emotion_text": "",
+            "risk_text": "",
+            "empathy_reply": "",
+            "advice_reply": "",
+            "buffer_reply": "",
+            "avoid_phrases": [],
+            "alternative_phrases": [],
+            "parsed_sections": {},
         }
 
     rag_df = response_df = bm25 = None
@@ -896,22 +1152,33 @@ def generate_recommended_reply(
     )
 
     result = llm.invoke(prompt)
+    raw_text = clean_text(result.content)
 
-    return {
-        "question": question,
-        "query_type": query_type,
-        "search_query": search_query,
-        "retrieved_docs": retrieved_docs,
-        "situation_summary": situation_summary,
-        "main_emotion": main_emotion,
-        "risk_level": risk_level,
-        "response_examples": response_examples,
-        "result_text": result.content,
-    }
+    repaired_text, sections = repair_llm_output_if_needed(
+        llm=llm,
+        question=question,
+        situation_summary=situation_summary,
+        main_emotion=main_emotion,
+        risk_level=risk_level,
+        raw_text=raw_text,
+    )
+
+    return build_structured_result_from_sections(
+        question=question,
+        query_type=query_type,
+        search_query=search_query,
+        retrieved_docs=retrieved_docs,
+        situation_summary=situation_summary,
+        main_emotion=main_emotion,
+        risk_level=risk_level,
+        response_examples=response_examples,
+        raw_text=repaired_text,
+        sections=sections,
+    )
 
 
 # ============================================================
-# 9. 단독 실행 테스트
+# 10. 단독 실행 테스트
 # ============================================================
 def main() -> None:
     test_question = "남자친구가 내 말을 제대로 안 들어주는 것 같아서 서운해. 어떻게 보내면 좋을까?"
@@ -940,6 +1207,15 @@ def main() -> None:
 
     print("\n===== 응답 예시 =====")
     print(output["response_examples"])
+
+    print("\n===== 공감형 =====")
+    print(output["empathy_reply"])
+
+    print("\n===== 조언형 =====")
+    print(output["advice_reply"])
+
+    print("\n===== 갈등 완충형 =====")
+    print(output["buffer_reply"])
 
     print("\n===== 최종 생성 결과 =====")
     print(output["result_text"])
