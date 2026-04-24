@@ -1,270 +1,323 @@
 # Streamlit App 프로젝트 함수 사용 가이드
 
-## 목적
+## 1. 문서 목적
 
-`app/streamlit_app.py`를 기준으로 현재 프로젝트에 이미 있는 기능을 어떻게 연결할지 정리한다.
+본 문서는 `app/streamlit_app.py`를 기준으로, 프로젝트에 구현된 감정 분석, 위험도 분석, RAG 추천 답변 생성 기능을 Streamlit UI와 연결하는 방법을 정리한 문서이다.
 
-현재 `streamlit_app.py`는 UI 목업에 가깝다.
-감정 분석, 위험도 분석, 추천 답변, 대화 히스토리 값이 대부분 고정값이다.
-실제 서비스 동작을 위해서는 `src/rag`, `src/emotion` 쪽 함수를 연결해야 한다.
+현재 Streamlit 앱은 UI 구조가 먼저 구성된 상태이며, 실제 서비스 동작을 위해서는 `src/emotion`, `src/rag`, `src/app_service.py`의 기능을 연결해야 한다.
 
 ---
 
-## 1. 현재 `streamlit_app.py` 구조
+## 2. 현재 Streamlit App 구조
 
-파일:
+### 대상 파일
 
 ```text
 app/streamlit_app.py
 ```
 
-현재 함수:
+### 주요 함수
 
 | 함수 | 역할 | 현재 상태 |
 |---|---|---|
-| `apply_custom_css()` | Streamlit 화면 CSS 적용 | 사용 중 |
-| `render_analysis_card(title, emoji, label, score, color)` | 감정/위험도 카드 렌더링 | 고정값 표시 |
-| `render_history_item(icon, title, time, preview, is_active=False)` | 히스토리 항목 렌더링 | 고정값 표시 |
-| `main()` | 전체 Streamlit 화면 구성 | 분석 로직 미연결 |
-
-현재 고정값 예시:
-
-```python
-render_analysis_card("감정 분석", "😡", "분노", 92, "#5C7CFA")
-render_analysis_card("위험도 분석", "⏱️", "높음", 88, "#E74C3C")
-```
-
-현재 추천 답변 고정값:
-
-```python
-recs = [
-    "지금 화가 많이 난 것 같아. 무슨 일이 있었는지 이야기해줄래?",
-    "내 마음이 이해돼. 잠시 숨을 고르고 천천히 이야기해보자.",
-    "그런 일이 있어서 속상했겠네. 내가 들어줄게.",
-]
-```
+| `apply_custom_css()` | 화면 CSS 적용 | 사용 중 |
+| `render_analysis_card()` | 감정/위험도 카드 렌더링 | 동적 데이터 연결 필요 |
+| `render_history_item()` | 히스토리 항목 렌더링 | 세션 데이터 연결 필요 |
+| `main()` | 전체 화면 구성 | 분석 로직 연결 필요 |
 
 ---
 
-## 2. Streamlit 앱에서 우선 연결할 기능
-
-우선순위:
+## 3. 우선 연결할 기능
 
 1. 사용자 입력 저장
-2. 대화 발화 리스트 생성
-3. 감정 분석
-4. 위험도 분석
-5. RAG 추천 답변 생성
-6. 분석 카드 동적 표시
+2. 갈등 유형 선택값 저장
+3. 감정 및 위험도 분석
+4. RAG 기반 추천 답변 생성
+5. 분석 결과 payload 생성
+6. 감정/위험도 카드 동적 표시
 7. 추천 답변 동적 표시
-8. 최근 대화 히스토리 표시
+8. 대화 히스토리 저장 및 표시
 
 ---
 
-## 3. API key 로딩
+## 4. 권장 통합 방식
 
-### 사용할 파일
+현재 프로젝트에는 전체 분석 흐름을 연결하는 서비스 함수가 존재한다.
+
+```python
+from src.app_service import run_chat_analysis
+```
+
+`run_chat_analysis()`는 사용자 입력과 갈등 유형을 받아 다음 흐름을 수행한다.
 
 ```text
-src/rag/api_key_loader.py
+사용자 입력
+→ Gemini 감정/위험도 분석
+→ RAG 추천 답변 생성
+→ 결과 payload 정리
+→ Streamlit UI 출력용 데이터 반환
 ```
 
-### 사용할 함수
-
-```python
-from src.rag.api_key_loader import load_api_key
-```
-
-### 역할
-
-`OPENAI_API_KEY`를 다음 순서로 가져온다.
-
-1. `.streamlit/secrets.toml`
-2. `data/.env`
-3. 루트 `.env`
-
-### 예시
-
-```python
-from src.rag.api_key_loader import load_api_key
-
-openai_api_key = load_api_key("OPENAI_API_KEY")
-```
-
-`build_rag_chain.generate_recommended_reply()` 내부에서도 `load_api_key()`를 사용한다.
-따라서 Streamlit app에서 RAG 추천만 사용할 경우 직접 호출이 필수는 아니다.
+따라서 Streamlit 앱에서는 개별 함수를 직접 모두 호출하기보다, 우선 `run_chat_analysis()`를 중심으로 연결하는 방식을 권장한다.
 
 ---
 
-## 4. RAG 추천 답변 생성
+## 5. 프로젝트 import 경로 설정
 
-### 사용할 파일
-
-```text
-src/rag/build_rag_chain.py
-```
-
-### 핵심 함수
+`app/streamlit_app.py`가 `app/` 폴더 안에 있으므로, `src` 모듈 import를 위해 프로젝트 루트를 path에 추가한다.
 
 ```python
-from src.rag.build_rag_chain import generate_recommended_reply
+from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 ```
 
-### 함수 역할
+---
 
-사용자 질문을 받아 다음 결과를 반환한다.
+## 6. Streamlit 캐시 적용
+
+동일한 입력을 반복 분석하지 않도록 Streamlit 캐시를 적용한다.
 
 ```python
-{
-    "question": 질문,
-    "method": 검색방식,
-    "retrieved_docs": 검색문서목록,
-    "situation_summary": 상황요약,
-    "main_emotion": 주요감정,
-    "risk_level": 위험도,
-    "response_examples": 추천 예시,
-    "result_text": 최종추천답변,
-}
+import streamlit as st
+from src.app_service import run_chat_analysis
+
+@st.cache_data(ttl=600, show_spinner=False)
+def cached_analysis(user_text: str, conflict_type: str):
+    return run_chat_analysis(user_text, conflict_type=conflict_type)
 ```
 
-### 기본 사용 예시
+---
+
+## 7. 사용자 입력 처리 예시
 
 ```python
-from src.rag.build_rag_chain import generate_recommended_reply
+if prompt := st.chat_input("현재 상황을 입력해주세요."):
+    prompt = prompt.strip()
 
-rag_result = generate_recommended_reply(
-    question="남자친구가 내 말을 제대로 안 들어줘서 서운해. 뭐라고 보내면 좋을까?",
-    method="rrf",
-    k=3,
-)
+    if not prompt:
+        st.stop()
 
-recommended_text = rag_result["result_text"]
-retrieved_docs = rag_result["retrieved_docs"]
-situation_summary = rag_result["situation_summary"]
-main_emotion = rag_result["main_emotion"]
-risk_level = rag_result["risk_level"]
-```
-
-### Streamlit 연결 예시
-
-```python
-if prompt := st.chat_input("메시지를 입력하세요..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    with st.spinner("추천 답변 생성 중..."):
-        rag_result = generate_recommended_reply(prompt, method="rrf", k=3)
-
-    st.session_state.latest_rag_result = rag_result
     st.session_state.messages.append({
-        "role": "assistant",
-        "avatar": "🍴",
-        "content": rag_result["result_text"],
+        "role": "user",
+        "content": prompt,
     })
+
+    st.session_state.pending_prompt = prompt
+    st.session_state.pending_conflict_type = st.session_state.conflict_type
+
     st.rerun()
 ```
 
 ---
 
-## 5. 감정 분석
-
-### 사용할 파일
-
-```text
-src/emotion/emotion_analyzer.py
-src/emotion/llm_connector.py
-```
-
-### 사용할 함수
+## 8. 분석 실행 예시
 
 ```python
-from src.emotion import create_gemini_caller
-from src.emotion import analyze_emotion, analyze_dialogue_emotion
-```
+if st.session_state.pending_prompt:
+    with st.spinner("AI 분석 중..."):
+        try:
+            prompt = st.session_state.pending_prompt
+            conflict_type = st.session_state.pending_conflict_type
 
-### 단일 발화 분석 예시
+            result = cached_analysis(prompt, conflict_type)
 
-```python
-from src.emotion import create_gemini_caller, analyze_emotion
+            result["user_input"] = prompt
+            result["conflict_type"] = conflict_type
 
-llm_caller = create_gemini_caller()
+            st.session_state.latest_result = result
 
-emotion_result = analyze_emotion(
-    "너 왜 또 늦었어?",
-    llm_caller=llm_caller,
-)
+            st.session_state.messages.append({
+                "role": "assistant",
+                "avatar": "🎁",
+                "content": "분석이 완료됐어요. 오른쪽 패널에서 결과를 확인해보세요.",
+            })
 
-primary = emotion_result.primary
-confidence = emotion_result.confidence_percent
-strategy = emotion_result.strategy
-reasoning = emotion_result.reasoning
-```
+            st.session_state.history.insert(0, result)
 
-### 대화 전체 감정 분석 예시
+            st.session_state.pending_prompt = None
+            st.session_state.pending_conflict_type = None
 
-```python
-from src.emotion import create_gemini_caller, analyze_dialogue_emotion
+            st.rerun()
 
-llm_caller = create_gemini_caller()
-
-utterances = [
-    "너 왜 또 늦었어?",
-    "미안해. 일이 늦게 끝났어.",
-    "항상 이런 식이잖아.",
-]
-
-emotion_result = analyze_dialogue_emotion(
-    utterances,
-    dialogue_id="chat_001",
-    llm_caller=llm_caller,
-)
-
-emotion_sequence = emotion_result.emotion_sequence
-dominant_emotion = emotion_result.dominant_emotion
-negative_ratio = emotion_result.negative_ratio_percent
-volatility = emotion_result.emotion_volatility_percent
+        except Exception as e:
+            st.session_state.error_message = str(e)
+            st.session_state.pending_prompt = None
+            st.session_state.pending_conflict_type = None
+            st.rerun()
 ```
 
 ---
 
-## 6. 위험도 분석
+## 9. 감정/위험도 카드 연결
 
-### 사용할 파일
-
-```text
-src/emotion/risk_analyzer.py
-```
-
-### 사용할 함수
+`latest_result`에서 감정과 위험도 정보를 가져와 카드에 표시한다.
 
 ```python
-from src.emotion import analyze_risk, full_analysis
+latest = st.session_state.latest_result
+
+if latest:
+    emotion_info = latest.get("emotion", {})
+    risk_info = latest.get("risk", {})
+
+    emotion_label = emotion_info.get("label", "미분석")
+    emotion_score = int(emotion_info.get("score", 0))
+
+    risk_label = risk_info.get("label", "미분석")
+    risk_score = int(risk_info.get("score", 0))
+else:
+    emotion_label = "대기 중"
+    emotion_score = 0
+    risk_label = "대기 중"
+    risk_score = 0
 ```
 
-### 위험도만 분석
+카드 렌더링 예시:
 
 ```python
-from src.emotion import create_gemini_caller, analyze_risk
-
-llm_caller = create_gemini_caller()
-
-risk_result = analyze_risk(
-    [
-        "너 왜 또 늦었어?",
-        "미안해. 일이 늦게 끝났어.",
-    ],
-    dialogue_id="chat_001",
-    llm_caller=llm_caller,
+render_analysis_card(
+    title="감정 분석",
+    emoji="🙂",
+    label=emotion_label,
+    score=emotion_score,
+    color="#5C7CFA",
 )
 
-risk_label = risk_result.risk_label
-risk_level = risk_result.risk_level
-risk_score = risk_result.risk_score_percent
-recommendation = risk_result.recommendation
+render_analysis_card(
+    title="위험도 분석",
+    emoji="⏱️",
+    label=risk_label,
+    score=risk_score,
+    color="#E74C3C",
+)
 ```
 
-### 감정 + 위험도 통합 분석
+---
 
-Streamlit 앱에서는 이 방식이 가장 단순하다.
+## 10. 분석 리포트 연결
+
+```python
+if latest:
+    render_report_item("🏷️", "갈등유형", latest.get("conflict_type", "미선택"))
+    render_report_item("📝", "상황 요약", latest.get("summary_text", ""))
+    render_report_item("💬", "감정 해석", latest.get("emotion_text", ""))
+    render_report_item("⚠️", "위험도 해석", latest.get("risk_text", ""))
+
+    risk_obj = latest.get("risk", {})
+    if isinstance(risk_obj, dict) and risk_obj.get("recommendation"):
+        render_report_item("🧭", "대응 가이드", risk_obj["recommendation"])
+```
+
+---
+
+## 11. 추천 답변 연결
+
+`run_chat_analysis()` 결과에는 추천 답변 3종이 포함된다.
+
+```python
+styles = [
+    ("공감형", "💛", latest.get("empathy_reply", "")),
+    ("조언형", "🗣️", latest.get("advice_reply", "")),
+    ("갈등 완충형", "🤝", latest.get("buffer_reply", "")),
+]
+```
+
+렌더링 예시:
+
+```python
+for label, icon, reply in styles:
+    if reply:
+        st.markdown(
+            f"""
+            <div class="list-item">
+                <div class="item-icon">{icon}</div>
+                <div class="item-content" style="padding-right:0;">
+                    <strong>{label}</strong><br>{reply}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+```
+
+---
+
+## 12. 피해야 할 표현 / 대체 표현 연결
+
+```python
+avoid_phrases = latest.get("avoid_phrases", [])
+alternative_phrases = latest.get("alternative_phrases", [])
+```
+
+렌더링 예시:
+
+```python
+render_phrase_box(
+    "피해야 할 표현",
+    avoid_phrases[:3],
+    "없음",
+)
+
+render_phrase_box(
+    "대체 표현",
+    alternative_phrases[:3],
+    "없음",
+)
+```
+
+---
+
+## 13. 대화 히스토리 연결
+
+```python
+if st.session_state.history:
+    for index, item in enumerate(st.session_state.history[:3]):
+        title = f"[{item.get('conflict_type', '미선택')}] {item.get('user_input', '')[:24]}"
+        preview = "오른쪽 패널에서 결과를 확인해보세요."
+
+        render_history_item(
+            "👩🏻‍❤️‍🧑🏻",
+            title,
+            "방금" if index == 0 else f"{index + 1}분전",
+            preview,
+            is_active=(index == 0),
+        )
+else:
+    render_history_item(
+        "👩🏻‍❤️‍🧑🏻",
+        "히스토리 없음",
+        "-",
+        "첫 분석을 시작해보세요.",
+        True,
+    )
+```
+
+---
+
+## 14. 개별 함수 직접 호출 방식
+
+필요한 경우 아래 프로젝트 함수를 직접 사용할 수 있다.
+
+### 14.1 RAG 추천 답변 생성
+
+```python
+from src.rag.build_rag_chain import generate_recommended_reply
+
+rag_result = generate_recommended_reply(
+    question="남자친구가 내 말을 제대로 안 들어줘서 서운해.",
+    conflict_type="연락 문제 > 답장 지연",
+    method="rrf",
+    k=3,
+)
+```
+
+---
+
+### 14.2 Gemini 감정/위험도 통합 분석
 
 ```python
 from src.emotion import create_gemini_caller, full_analysis
@@ -272,56 +325,15 @@ from src.emotion import create_gemini_caller, full_analysis
 llm_caller = create_gemini_caller()
 
 analysis = full_analysis(
-    [
-        "너 왜 또 늦었어?",
-        "미안해. 일이 늦게 끝났어.",
-        "항상 이런 식이잖아.",
-    ],
+    ["너 왜 또 늦었어?", "미안해. 일이 늦게 끝났어."],
     dialogue_id="chat_001",
     llm_caller=llm_caller,
 )
-
-emotion = analysis["emotion"]
-risk = analysis["risk"]
-```
-
-반환값 사용 예:
-
-```python
-emotion_label = emotion["dominant_emotion"]
-emotion_score = emotion["negative_ratio_percent"]
-risk_label = risk["risk_label"]
-risk_score = risk["risk_score_percent"]
 ```
 
 ---
 
-## 7. Gemini Function Calling Router
-
-### 사용할 파일
-
-```text
-src/emotion/llm_connector.py
-```
-
-### 사용할 함수
-
-```python
-from src.emotion import create_gemini_function_router
-```
-
-### 역할
-
-Gemini가 아래 도구 중 하나를 선택해 실행하도록 구성한다.
-
-| tool name | 연결 함수 |
-|---|---|
-| `analyze_single_emotion` | `analyze_emotion()` |
-| `analyze_dialogue_emotion` | `analyze_dialogue_emotion()` |
-| `analyze_dialogue_risk` | `analyze_risk()` |
-| `full_dialogue_analysis` | `full_analysis()` |
-
-### 사용 예시
+### 14.3 Gemini Function Calling Router
 
 ```python
 from src.emotion import create_gemini_function_router
@@ -329,238 +341,63 @@ from src.emotion import create_gemini_function_router
 router = create_gemini_function_router()
 
 response = router.route(
-    "다음 대화의 감정 흐름과 갈등 위험도를 분석해줘: "
-    "['너 왜 또 늦었어?', '미안해. 일이 늦게 끝났어.']"
+    "다음 대화의 감정 흐름과 갈등 위험도를 분석해줘."
 )
 ```
 
-### Streamlit에서 권장 사용 위치
-
-- 일반 추천 답변: `generate_recommended_reply()` 우선
-- 감정/위험도 카드: `full_analysis()` 우선
-- 사용자가 자유 형식으로 “분석해줘”라고 요청하는 기능: `create_gemini_function_router()` 사용 가능
-
 ---
 
-## 8. `streamlit_app.py`에서 추가하면 좋은 내부 함수
+## 15. 기능별 사용 판단표
 
-현재 `streamlit_app.py`는 모든 로직이 `main()` 안에 몰려 있다.
-아래 함수를 app 내부에 추가하면 연결이 쉬워진다.
-
-### 8.1 프로젝트 import 경로 설정
-
-`app/streamlit_app.py`는 `app/` 폴더에 있으므로 `src` import를 위해 프로젝트 루트를 path에 추가한다.
-
-```python
-from pathlib import Path
-import sys
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-```
-
-### 8.2 대화 발화 리스트 생성
-
-```python
-def build_utterances_from_messages(messages: list[dict]) -> list[str]:
-    return [
-        message["content"]
-        for message in messages
-        if message.get("role") in {"user", "assistant"}
-        and message.get("content")
-    ]
-```
-
-### 8.3 RAG 추천 실행
-
-```python
-def run_rag_recommendation(prompt: str) -> dict:
-    from src.rag.build_rag_chain import generate_recommended_reply
-
-    return generate_recommended_reply(
-        question=prompt,
-        method="rrf",
-        k=3,
-    )
-```
-
-### 8.4 감정/위험도 통합 분석 실행
-
-```python
-def run_emotion_risk_analysis(utterances: list[str]) -> dict:
-    from src.emotion import create_gemini_caller, full_analysis
-
-    llm_caller = create_gemini_caller()
-    return full_analysis(
-        utterances,
-        dialogue_id="streamlit_current_chat",
-        llm_caller=llm_caller,
-    )
-```
-
-### 8.5 분석 카드 데이터 변환
-
-```python
-def build_analysis_cards(analysis: dict) -> dict:
-    emotion = analysis["emotion"]
-    risk = analysis["risk"]
-
-    return {
-        "emotion": {
-            "emoji": "😡" if emotion["dominant_group"] == "negative" else "🙂",
-            "label": emotion["dominant_emotion"],
-            "score": emotion["negative_ratio_percent"],
-            "color": "#5C7CFA",
-        },
-        "risk": {
-            "emoji": "⏱️",
-            "label": risk["risk_label"],
-            "score": risk["risk_score_percent"],
-            "color": "#E74C3C" if risk["risk_score_percent"] >= 60 else "#37B24D",
-        },
-    }
-```
-
-### 8.6 추천 답변 리스트 추출
-
-`generate_recommended_reply()`의 `result_text`가 여러 문장을 포함할 수 있으므로 우선 단일 추천으로 표시한다.
-추후 파싱 규칙을 추가한다.
-
-```python
-def build_recommendations(rag_result: dict) -> list[str]:
-    result_text = rag_result.get("result_text", "")
-    if not result_text:
-        return []
-    return [result_text]
-```
-
----
-
-## 9. Streamlit 통합 예시
-
-아래는 현재 `main()`의 `st.chat_input()` 처리부를 대체할 수 있는 형태다.
-
-```python
-if prompt := st.chat_input("메시지를 입력하세요..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    with st.spinner("AI 분석 및 추천 답변 생성 중..."):
-        rag_result = run_rag_recommendation(prompt)
-        utterances = build_utterances_from_messages(st.session_state.messages)
-        analysis = run_emotion_risk_analysis(utterances)
-
-    st.session_state.latest_rag_result = rag_result
-    st.session_state.latest_analysis = analysis
-    st.session_state.messages.append({
-        "role": "assistant",
-        "avatar": "🍴",
-        "content": rag_result["result_text"],
-    })
-    st.rerun()
-```
-
-오른쪽 분석 카드 렌더링 예:
-
-```python
-analysis = st.session_state.get("latest_analysis")
-
-if analysis:
-    cards = build_analysis_cards(analysis)
-    with card_l:
-        render_analysis_card(
-            "감정 분석",
-            cards["emotion"]["emoji"],
-            cards["emotion"]["label"],
-            cards["emotion"]["score"],
-            cards["emotion"]["color"],
-        )
-    with card_r:
-        render_analysis_card(
-            "위험도 분석",
-            cards["risk"]["emoji"],
-            cards["risk"]["label"],
-            cards["risk"]["score"],
-            cards["risk"]["color"],
-        )
-else:
-    with card_l:
-        render_analysis_card("감정 분석", "💬", "대기", 0, "#ADB5BD")
-    with card_r:
-        render_analysis_card("위험도 분석", "⏱️", "대기", 0, "#ADB5BD")
-```
-
-추천 답변 렌더링 예:
-
-```python
-rag_result = st.session_state.get("latest_rag_result")
-recommendations = build_recommendations(rag_result) if rag_result else []
-
-if recommendations:
-    for index, text in enumerate(recommendations, 1):
-        st.markdown(
-            f'<div class="list-item"><div class="item-icon">{index}</div>'
-            f'<div class="item-content">{text}</div>'
-            f'<div style="color:#ccc;">❐</div></div>',
-            unsafe_allow_html=True,
-        )
-else:
-    st.info("메시지를 입력하면 추천 답변이 표시됩니다.")
-```
-
----
-
-## 10. 기능별 사용 판단표
-
-| Streamlit 기능 | 사용할 프로젝트 함수 | 비고 |
+| Streamlit 기능 | 사용할 함수 또는 데이터 | 비고 |
 |---|---|---|
-| API key 확인 | `src.rag.api_key_loader.load_api_key()` | RAG용 OpenAI key |
-| 추천 답변 생성 | `src.rag.build_rag_chain.generate_recommended_reply()` | 핵심 응답 생성 |
-| 단일 발화 감정 | `src.emotion.analyze_emotion()` | Gemini caller 필요 |
-| 대화 감정 흐름 | `src.emotion.analyze_dialogue_emotion()` | Gemini caller 필요 |
-| 위험도 분석 | `src.emotion.analyze_risk()` | Gemini caller 필요 |
-| 감정+위험도 통합 | `src.emotion.full_analysis()` | Streamlit 카드용 추천 |
-| Gemini caller 생성 | `src.emotion.create_gemini_caller()` | Gemini key 필요 |
-| Function Calling | `src.emotion.create_gemini_function_router()` | 자유 분석 요청용 |
-| 검색 문서 표시 | `rag_result["retrieved_docs"]` | 디버그/근거 표시용 |
-| 추천 예시 표시 | `rag_result["response_examples"]` | UI 확장용 |
+| 전체 분석 실행 | `run_chat_analysis()` | 권장 통합 방식 |
+| 추천 답변 생성 | `generate_recommended_reply()` | 개별 호출 시 사용 |
+| 감정/위험도 분석 | `full_analysis()` | 개별 호출 시 사용 |
+| Gemini caller 생성 | `create_gemini_caller()` | Gemini API Key 필요 |
+| Function Calling | `create_gemini_function_router()` | 자유 분석 요청용 |
+| 검색 문서 표시 | `retrieved_docs` | 근거 표시용 |
+| 추천 예시 표시 | `response_examples` | UI 확장용 |
 
 ---
 
-## 11. 최소 구현 순서
+## 16. 최소 구현 순서
 
-1. `app/streamlit_app.py` 상단에 프로젝트 루트 path 설정
-2. `run_rag_recommendation()` 추가
-3. `build_utterances_from_messages()` 추가
-4. `run_emotion_risk_analysis()` 추가
-5. `st.session_state.latest_rag_result` 저장
-6. `st.session_state.latest_analysis` 저장
-7. 고정 분석 카드 제거
-8. 고정 추천 답변 제거
-9. fallback UI 추가
-10. 실제 API key 기반 smoke test
+1. 프로젝트 루트 path 설정
+2. `run_chat_analysis()` import
+3. `cached_analysis()` 추가
+4. 사용자 입력 저장
+5. pending 상태 저장
+6. 분석 실행 후 `latest_result` 저장
+7. 감정/위험도 카드 동적 연결
+8. 추천 답변 3종 연결
+9. 피해야 할 표현/대체 표현 연결
+10. 히스토리 저장 및 표시
+11. 에러 메시지 처리
+12. API Key 기반 smoke test
 
 ---
 
-## 12. 주의 사항
+## 17. 주의 사항
 
-### API key
+### 17.1 API Key
 
-- secret 값 출력 금지
-- `.streamlit/secrets.toml` 우선 사용
-- `.env`는 fallback 용도
+- Secret 값은 출력하지 않는다.
+- `.streamlit/secrets.toml`을 우선 사용한다.
+- `.env`는 fallback 용도로 사용한다.
 
-### 비용
+### 17.2 비용
 
-`generate_recommended_reply()`와 `full_analysis()`를 동시에 호출하면 LLM 호출이 여러 번 발생한다.
-초기 구현에서는 버튼 클릭 또는 사용자 입력 시에만 실행한다.
+`run_chat_analysis()`는 Gemini 분석과 RAG 답변 생성을 함께 수행하므로 LLM 호출 비용이 발생한다.
 
-### 속도
+따라서 사용자 입력 시에만 실행하고, 동일 입력은 캐시를 활용한다.
 
-RAG vector DB 로딩이 무거울 수 있다.
-Streamlit에서는 캐시 사용 권장.
+### 17.3 속도
 
-예:
+RAG 검색 및 벡터 DB 로딩은 시간이 걸릴 수 있다.  
+Streamlit에서는 `st.cache_data`, `st.cache_resource`를 적극 활용한다.
+
+예시:
 
 ```python
 @st.cache_resource
@@ -569,10 +406,19 @@ def get_gemini_caller():
     return create_gemini_caller()
 ```
 
-RAG 전체 함수 `generate_recommended_reply()` 내부는 매번 데이터/벡터DB를 로딩한다.
-성능 개선 단계에서는 `load_dataframes()`, `build_bm25()`, `load_vector_db()`, `load_example_vector_db()`, `load_llm()`을 캐시하는 wrapper를 별도로 둔다.
+---
 
-### 현재 앱 상태
+## 18. 최종 정리
 
-현재 `app/streamlit_app.py`는 디자인과 레이아웃이 먼저 잡힌 상태다.
-다음 작업은 UI 개편보다 프로젝트 함수 연결이 우선이다.
+현재 Streamlit 앱은 UI 구조가 먼저 구현된 상태이며, 이후 핵심 작업은 프로젝트 함수와 실제 분석 결과를 연결하는 것이다.
+
+최종적으로 Streamlit 앱은 다음 흐름으로 동작한다.
+
+```text
+갈등 유형 선택
+→ 사용자 상황 입력
+→ 감정/위험도 분석
+→ RAG 기반 답변 생성
+→ UI 출력
+→ 히스토리 저장
+```
