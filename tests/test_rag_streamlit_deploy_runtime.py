@@ -110,10 +110,10 @@ class RagStreamlitDeployRuntimeTest(unittest.TestCase):
             ),
             patch.object(rag, "load_llm", return_value=FakeChatModel()),
         ):
-            result = rag.generate_recommended_reply("왜 연락 안 했어?", method="rrf", k=3)
+            result = rag.generate_recommended_reply("왜 연락 안 했어?", k=3)
 
         load_dataframes.assert_not_called()
-        self.assertEqual(result["method"], "rrf")
+        self.assertEqual(result["method"], "pinecone")
         self.assertEqual(result["retrieved_docs"][0]["dialogue_id"], "d1")
         self.assertEqual(
             [item["label"] for item in result["recommended_replies"]],
@@ -144,7 +144,7 @@ class RagStreamlitDeployRuntimeTest(unittest.TestCase):
         self.assertEqual(candidates.iloc[0]["listener_response"], "많이 서운했겠어.")
 
     def test_bm25_requires_local_csv_inputs(self) -> None:
-        with self.assertRaisesRegex(ValueError, "로컬 CSV"):
+        with self.assertRaisesRegex(ValueError, "local CSV"):
             rag.retrieve_documents(
                 question="서운해",
                 rag_df=None,
@@ -154,7 +154,7 @@ class RagStreamlitDeployRuntimeTest(unittest.TestCase):
                 k=3,
             )
 
-    def test_app_service_default_path_keeps_rrf_contract(self) -> None:
+    def test_app_service_default_path_uses_pinecone_only(self) -> None:
         with (
             patch.object(app_service, "create_gemini_caller", return_value=object()),
             patch.object(
@@ -181,7 +181,8 @@ class RagStreamlitDeployRuntimeTest(unittest.TestCase):
 
         generate_reply.assert_called_once_with(
             question="왜 연락 안 했어?",
-            method="rrf",
+            conflict_type="",
+            method="pinecone",
             k=3,
         )
         self.assertEqual(payload["recommended_replies"][0]["label"], "공감형")

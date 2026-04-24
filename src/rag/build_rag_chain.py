@@ -450,6 +450,9 @@ def retrieve_documents(
 
     search_k = max(k * 4, 12)
 
+    if method == "bm25":
+        raise ValueError("BM25 requires local CSV files and is disabled for Streamlit runtime.")
+
     dense_results = dense_search(question, vector_db=vector_db, k=search_k)
 
     bm25_results = []
@@ -461,8 +464,6 @@ def retrieve_documents(
             [bm25_results, dense_results],
             top_n=search_k
         )
-    elif method == "bm25":
-        fused = bm25_results
     else:
         fused = dense_results
 
@@ -1021,16 +1022,20 @@ def build_structured_result_from_sections(
     response_examples: str,
     raw_text: str,
     sections: dict[str, str],
+    method: str = "pinecone",
+    recommended_replies: list[dict] | None = None,
 ) -> dict:
     return {
         "question": question,
         "query_type": query_type,
+        "method": method,
         "search_query": search_query,
         "retrieved_docs": retrieved_docs,
         "situation_summary": situation_summary,
         "main_emotion": main_emotion,
         "risk_level": risk_level,
         "response_examples": response_examples,
+        "recommended_replies": recommended_replies or [],
         "result_text": raw_text,
         "assistant_message": raw_text,
         "summary_text": clean_text(sections.get("상황 요약")) or situation_summary,
@@ -1082,7 +1087,7 @@ def repair_llm_output_if_needed(
 def generate_recommended_reply(
     question: str,
     conflict_type: str = "",
-    method: str = "rrf",
+    method: str = "pinecone",
     k: int = 3,
     use_local_csv: bool = False,
 ) -> dict:
@@ -1094,6 +1099,7 @@ def generate_recommended_reply(
         return {
             "question": question,
             "query_type": query_type,
+            "method": method,
             "result_text": "연애/커플 상황이 아닙니다.",
             "assistant_message": "연애/커플 상황이 아닙니다.",
             "summary_text": "",
@@ -1102,16 +1108,16 @@ def generate_recommended_reply(
             "empathy_reply": "",
             "advice_reply": "",
             "buffer_reply": "",
+            "recommended_replies": [],
             "avoid_phrases": [],
             "alternative_phrases": [],
             "parsed_sections": {},
         }
 
-    rag_df = response_df = bm25 = None
+    if use_local_csv:
+        raise ValueError("Streamlit runtime is Pinecone-only. Local CSV loading is disabled.")
 
-    if use_local_csv or method in ("bm25", "rrf"):
-        rag_df, response_df = load_dataframes()
-        bm25 = build_bm25(rag_df)
+    rag_df = response_df = bm25 = None
 
     vector_db = load_vector_db(openai_api_key)
     example_vector_db = load_example_vector_db(openai_api_key)
@@ -1134,13 +1140,23 @@ def generate_recommended_reply(
 
     context = format_docs(retrieved_docs) if retrieved_docs else "검색 결과 없음"
 
-    response_examples = get_response_examples(
+    recommended_replies = get_labeled_response_examples(
         response_df=response_df,
         retrieved_docs=retrieved_docs,
         emotion=main_emotion,
         question=question,
         example_vector_db=example_vector_db,
     )
+    if recommended_replies:
+        response_examples = format_labeled_response_examples(recommended_replies[:3])
+    else:
+        response_examples = get_response_examples(
+            response_df=response_df,
+            retrieved_docs=retrieved_docs,
+            emotion=main_emotion,
+            question=question,
+            example_vector_db=example_vector_db,
+        )
 
     prompt = PROMPT.format(
         question=question,
@@ -1174,6 +1190,8 @@ def generate_recommended_reply(
         response_examples=response_examples,
         raw_text=repaired_text,
         sections=sections,
+        method=method,
+        recommended_replies=recommended_replies,
     )
 
 
@@ -1182,7 +1200,7 @@ def generate_recommended_reply(
 # ============================================================
 def main() -> None:
     test_question = "남자친구가 내 말을 제대로 안 들어주는 것 같아서 서운해. 어떻게 보내면 좋을까?"
-    output = generate_recommended_reply(test_question, method="rrf", k=3)
+    output = generate_recommended_reply(test_question, method="pinecone", k=3)
 
     print("\n===== 입력 질문 =====")
     print(output["question"])

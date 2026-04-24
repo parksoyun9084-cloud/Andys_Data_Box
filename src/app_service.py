@@ -108,7 +108,7 @@ def run_chat_analysis(user_input: str, conflict_type: str = "") -> dict:
     rag_result = generate_recommended_reply(
         question=user_input,
         conflict_type=conflict_type,
-        method="rrf",
+        method="pinecone",
         k=3,
     )
 
