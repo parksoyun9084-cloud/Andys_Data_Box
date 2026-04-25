@@ -27,14 +27,14 @@
 
 ## 1. How to Run
 
-### 배포 서비스
+### 1-1. 배포 서비스
 🔗 https://andysdatabox-7tb38xujsfiq3uaiwdr9na.streamlit.app/
 
 별도의 설치 없이 웹에서 바로 사용 가능합니다.
 
 ---
 
-### 💻 로컬 실행 방법
+### 1-2. 로컬 실행 방법
 
 ```bash
 1. 환경 설정
@@ -58,7 +58,7 @@ streamlit run app/streamlit_app.py
 
 ## 2. Team
 
-## 🎁 Andy's Data Box
+### 🎁 Andy's Data Box
 
 <table align="center">
   <tr>
@@ -125,7 +125,7 @@ streamlit run app/streamlit_app.py
   </tr>
 </table>
 
-## 역할 분담
+### 역할 분담
 
 <table>
   <thead>
