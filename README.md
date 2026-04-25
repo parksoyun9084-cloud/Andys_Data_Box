@@ -310,10 +310,10 @@ streamlit run app/streamlit_app.py
 ```text
 project/
 │
-├─ app/                          # Streamlit UI (프론트엔드)
+├─ app/                          # Streamlit UI
 │   └─ streamlit_app.py         # 메인 실행 파일 (UI + 사용자 입력 처리)
 │
-├─ src/                         # 핵심 서비스 로직 (백엔드)
+├─ src/                         # 핵심 서비스 로직
 │   │
 │   ├─ app_service.py           # 전체 AI 파이프라인 orchestration
 │   │                           # (감정 분석 + 위험도 분석 + RAG + LLM 결과 통합)
