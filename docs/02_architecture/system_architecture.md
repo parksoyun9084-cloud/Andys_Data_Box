@@ -23,7 +23,7 @@
 
 본 시스템은 사용자 입력을 기반으로 감정 분석, 위험도 분석, RAG 검색, 답변 생성, 출력 후처리를 순차적으로 수행하는 파이프라인 구조로 구성되어 있다.
 
-<img src="docs/02_architecture/system_architecture.png" width="800">
+<img src="./system_architecture.png" width="800">
 
 ### 2-2. 아키텍처 설계 의도
 
