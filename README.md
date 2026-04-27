@@ -406,7 +406,6 @@ project/
 | 7. 출력 파싱 | LLM 응답을 섹션별로 분리 및 정리 | app_rag_result_parser.py |
 | 8. UI 출력 | 감정, 위험도, 추천 답변, 표현 가이드 표시 | app_payload_formatter.py / Streamlit UI |
 
----
 
 ### 11-1. 핵심 처리 단계 요약
 
