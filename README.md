@@ -201,16 +201,44 @@ streamlit run app/streamlit_app.py
 
 ## 4. 시스템 아키텍처
 
-<pre>
-사용자 입력
-→ Streamlit UI
-→ 감정 분석 (Gemini)
-→ 위험도 분석 (Gemini)
-→ RAG 검색 (BM25 + Dense + RRF)
-→ 답변 생성 (GPT)
-→ 출력 파싱 및 보정
-→ UI 출력
-</pre>
+본 시스템은 사용자 입력을 기반으로 감정 분석, 위험도 분석, RAG 검색, 답변 생성, 출력 후처리를 순차적으로 수행하는 파이프라인 구조로 구성되어 있습니다.
+
+```mermaid
+flowchart TD
+    A[사용자 입력]
+    B[Streamlit UI]
+
+    subgraph 분석 영역
+        C1[감정 분석 (Gemini)]
+        C2[위험도 분석 (Gemini)]
+    end
+
+    subgraph RAG 검색
+        D1[BM25]
+        D2[Dense Embedding]
+        D3[RRF 결합]
+    end
+
+    E[답변 생성 (GPT)]
+    F[출력 파싱 / UI 가공]
+    G[최종 결과 출력]
+
+    A --> B
+    B --> C1
+    B --> C2
+
+    C1 --> D1
+    C1 --> D2
+    C2 --> D1
+    C2 --> D2
+
+    D1 --> D3
+    D2 --> D3
+
+    D3 --> E
+    E --> F
+    F --> G
+```
 
 👉 상세 구조: [시스템 아키텍처](docs/02_architecture/system_architecture.md)
 
