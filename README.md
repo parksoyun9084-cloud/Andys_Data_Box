@@ -256,6 +256,9 @@ flowchart TD
 | rag_documents.csv | RAG 검색 문서 |
 | response_pairs.csv | 답변 추천 데이터 |
 
+
+👉 상세 데이터 설명: [데이터 설명 문서](docs/01_data/data_description.md)
+
 ---
 
 ## 6. RAG 기반 시스템
@@ -392,18 +395,27 @@ project/
 
 본 시스템은 사용자 입력을 단순히 LLM에 전달하는 구조가 아니라, 감정 분석·위험도 분석·RAG 검색·답변 생성·출력 후처리를 순차적으로 수행하는 파이프라인 구조로 설계하였다.
 
-```text
-사용자 입력
-→ 갈등 유형 및 세부 상황 선택
-→ Gemini 기반 감정 분석
-→ Gemini 기반 갈등 위험도 분석
-→ RAG 검색 쿼리 생성
-→ BM25 검색 + Dense 검색
-→ RRF 기반 검색 결과 결합
-→ 유사 사례 및 응답 예시 추출
-→ GPT 기반 답장 생성
-→ LLM 출력 파싱 및 보정
-→ Streamlit UI 출력
+```mermaid
+flowchart TD
+    A[Streamlit UI 입력] --> B[run_chat_analysis]
+
+    B --> C[Gemini 감정 분석]
+    B --> D[Gemini 위험도 분석]
+
+    C --> E[RAG 검색]
+    D --> E
+
+    E --> F[BM25 검색]
+    E --> G[Dense 검색]
+    F --> H[RRF 결합]
+    G --> H
+
+    H --> I[유사 사례 추출]
+    I --> J[GPT 답변 생성]
+
+    J --> K[출력 파싱]
+    K --> L[UI 표시 데이터 생성]
+    L --> M[Streamlit UI 출력]
 ```
 
 ### 11-1. 처리 단계별 역할
