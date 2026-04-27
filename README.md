@@ -395,30 +395,20 @@ project/
 
 본 시스템은 사용자 입력을 단순히 LLM에 전달하는 구조가 아니라, 감정 분석·위험도 분석·RAG 검색·답변 생성·출력 후처리를 순차적으로 수행하는 파이프라인 구조로 설계하였다.
 
-```mermaid
-flowchart TD
-    A[Streamlit UI 입력] --> B[run_chat_analysis]
+| 단계 | 처리 내용 | 주요 모듈 |
+|------|----------|----------|
+| 1. 사용자 입력 | 사용자가 갈등 유형과 현재 상황을 입력 | Streamlit UI |
+| 2. 감정 분석 | 입력 문장에서 주요 감정 추출 | Gemini / risk_analyzer.py |
+| 3. 위험도 분석 | 갈등 심화 가능성을 단계별로 판단 | Gemini / risk_analyzer.py |
+| 4. RAG 검색 | 유사한 연인 갈등 사례 검색 | build_rag_chain.py |
+| 5. 검색 결과 결합 | BM25 + Dense 검색 결과를 RRF로 결합 | build_rag_chain.py |
+| 6. 답변 생성 | 공감형 / 조언형 / 갈등 완충형 답변 생성 | GPT |
+| 7. 출력 파싱 | LLM 응답을 섹션별로 분리 및 정리 | app_rag_result_parser.py |
+| 8. UI 출력 | 감정, 위험도, 추천 답변, 표현 가이드 표시 | app_payload_formatter.py / Streamlit UI |
 
-    B --> C[Gemini 감정 분석]
-    B --> D[Gemini 위험도 분석]
+---
 
-    C --> E[RAG 검색]
-    D --> E
-
-    E --> F[BM25 검색]
-    E --> G[Dense 검색]
-    F --> H[RRF 결합]
-    G --> H
-
-    H --> I[유사 사례 추출]
-    I --> J[GPT 답변 생성]
-
-    J --> K[출력 파싱]
-    K --> L[UI 표시 데이터 생성]
-    L --> M[Streamlit UI 출력]
-```
-
-### 11-1. 처리 단계별 역할
+### 11-1. 핵심 처리 단계 요약
 
 | 단계 | 설명 |
 |------|------|

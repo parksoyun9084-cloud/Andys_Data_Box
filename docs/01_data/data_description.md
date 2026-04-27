@@ -142,29 +142,7 @@
 
 본 프로젝트의 데이터는 전처리 과정을 거쳐 감정 분석 및 RAG 기반 답변 생성에 활용되며, 전체 흐름은 아래와 같다.
 
-```mermaid
-flowchart TD
-    A[원본 대화 데이터] --> B[발화 단위 정리]
-    B --> C[감정 라벨 정규화]
-    C --> D[대화 단위 데이터 생성]
-    C --> E[발화 단위 데이터 생성]
-
-    D --> F[continuous_dialogue_dialogue.csv]
-    E --> G[continuous_dialogue_utterance.csv]
-
-    C --> H[연인 관계 데이터 필터링]
-    H --> I[RAG 문서 생성]
-    H --> J[응답 Pair 생성]
-
-    I --> K[rag_documents.csv]
-    J --> L[response_pairs.csv]
-
-    K --> M[Vector DB 적재]
-    L --> N[답변 생성 참고 데이터]
-
-    M --> O[RAG 검색 및 답변 추천 시스템]
-    N --> O
-```
+<img src="data_flow.png" width="800">
 
 👉 위 흐름을 통해 생성된 데이터는 Vector DB에 저장되거나, 감정 분석 및 답변 생성 모델의 입력 데이터로 활용된다.
 

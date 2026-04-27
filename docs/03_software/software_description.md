@@ -118,30 +118,7 @@ src/
 
 본 시스템의 전체 처리 흐름은 아래와 같으며, 각 단계는 독립적인 모듈로 구성되어 순차적으로 수행된다.
 
-```mermaid
-...
-```mermaid
-flowchart TD
-    A[Streamlit UI 입력] --> B[run_chat_analysis]
-
-    B --> C[Gemini 감정 분석]
-    B --> D[Gemini 위험도 분석]
-
-    C --> E[RAG 검색]
-    D --> E
-
-    E --> F[BM25 검색]
-    E --> G[Dense 검색]
-    F --> H[RRF 결합]
-    G --> H
-
-    H --> I[유사 사례 추출]
-    I --> J[GPT 답변 생성]
-
-    J --> K[출력 파싱]
-    K --> L[UI 데이터 생성]
-    L --> M[Streamlit UI 출력]
-```
+<img src="software_flow.png" width="800">
 
 👉 위 흐름은 app_service.py를 중심으로 각 모듈(emotion, rag, parsing)이 연결되어 수행된다.
 
